@@ -34,12 +34,12 @@ def safe_truncate(value: str | None, max_len: int) -> str:
     return value[:max_len] + "..." if len(value) > max_len else value
 
 
-def analyze_run_types(runs_df: pd.DataFrame) -> None:
+def analyze_run_types(runs_df: pd.DataFrame, history_df: pd.DataFrame) -> None:
     console.print(f"\n[bold blue]Run ID Type Classification Analysis[/bold blue]")
 
     grouped_data = parse_and_group_run_ids(runs_df)
     type_dataframes = convert_groups_to_dataframes(grouped_data)
-    processed_dataframes = apply_processing(type_dataframes, defaults={}, column_map={})
+    processed_dataframes = apply_processing(type_dataframes, runs_df=runs_df, history_df=history_df)
 
     all_run_ids = runs_df['run_id'].tolist()
     console.print(f"Total runs analyzed: [cyan]{len(all_run_ids):,}[/cyan]")
@@ -132,6 +132,7 @@ def analyze_run_types(runs_df: pd.DataFrame) -> None:
 
         for _, row in df.iterrows():
             detail_table.add_row(*[str(row[col]) if pd.notna(row[col]) else "N/A" for col in df.columns])
+        console.print(detail_table)
 
 def analyze_run_matching(runs_df: pd.DataFrame, matched_data: list[dict], pickle_filepath: str) -> None:
     console.print(f"\n[bold blue]Run Matching Analysis[/bold blue]")
@@ -189,7 +190,8 @@ def analyze_run_matching(runs_df: pd.DataFrame, matched_data: list[dict], pickle
 
 def main() -> None:
     runs_df, matched_data, pickle_filepath = load_runs_and_matched_data()
-    analyze_run_types(runs_df)
+    pretrain_df, runs_df_full, history_df = load_data()
+    analyze_run_types(runs_df, history_df)
 
 
 if __name__ == "__main__":

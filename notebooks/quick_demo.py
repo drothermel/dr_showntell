@@ -11,9 +11,38 @@ from rich.text import Text
 
 from dr_showntell.fancy_table import FancyTable
 from dr_showntell.datadec_utils import (
-    parse_run_id_components, load_data, match_runids_pattern, size_match_pretrained_df, recipe_match_pretrained_df, step_match_pretrained_df, runids_match_df,
+    load_data, match_runids_pattern, size_match_pretrained_df, recipe_match_pretrained_df, step_match_pretrained_df, runids_match_df,
 )
+from dr_showntell.run_id_parsing import classify_run_id_type_and_extract
+
 console = Console()
+
+
+def parse_run_id_components(run_id: str) -> dict[str, str]:
+    run_type, extracted_data = classify_run_id_type_and_extract(run_id)
+
+    components = {
+        "full_id": run_id,
+        "run_id_type": run_type,
+        "datetime": None,
+        "exp_name": None,
+        "exp_type": None,
+        "comparison_model_size": None,
+        "comparison_model_recipe": None,
+        "num_finetune_tokens": None,
+        "num_finetune_epochs": None,
+        "initial_checkpoint_size": None,
+        "initial_checkpoint_recipe": None,
+        "initial_checkpoint_steps": None,
+        "seed": None,
+        "lr": None,
+    }
+
+    for key, value in extracted_data.items():
+        if key in components:
+            components[key] = value
+
+    return components
 
 # Recipe mapping dictionaries
 

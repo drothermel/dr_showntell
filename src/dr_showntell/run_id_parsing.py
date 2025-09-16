@@ -21,10 +21,10 @@ LEARNING_RATE = r"(?P<lr>[0-9.e-]+)"
 LEARNING_RATE_1 = r"(?P<lr1>[0-9.e-]+)"
 LEARNING_RATE_2 = r"(?P<lr2>[0-9.e-]+)"
 FINETUNE_TOKENS_EPOCHS_8 = (
-    r"(?P<num_finetune_tokens>\d+[MB])tx(?P<num_finetune_epochs>\d+)"
+    r"(?P<num_finetune_tokens_per_epoch>\d+[MB])tx(?P<num_finetune_epochs>\d+)"
 )
 FINETUNE_TOKENS_EPOCHS_6 = (
-    r"(?P<num_finetune_tokens>\d+[MG])tx(?P<num_finetune_epochs>\d+)"
+    r"(?P<num_finetune_tokens_per_epoch>\d+[MG])tx(?P<num_finetune_epochs>\d+)"
 )
 FINETUNE_TOKENS_8 = r"(?P<num_finetune_tokens>\d+[MB])"
 FINETUNE_TOKENS_GT = r"(?P<num_finetune_tokens>\d+[MG]t)"
@@ -52,7 +52,7 @@ MATCHED_PREFIX_WITH_RECIPE = (
 )
 
 FT1_PATTERN = re.compile(
-    rf"^{TIMESTAMP_8_EXP_NAME}_{DD_BLOCK_STEPS_WORD}_{INITIAL_CHECKPOINT_STEPS_WORD}_{FINETUNE_TOKENS_8}tx(?P<num_finetune_epochs>\d+){LEARNING_RATE_FLAG}$"
+    rf"^{TIMESTAMP_8_EXP_NAME}_{DD_BLOCK_STEPS_WORD}_{INITIAL_CHECKPOINT_STEPS_WORD}_{FINETUNE_TOKENS_EPOCHS_8}{LEARNING_RATE_FLAG}$"
 )
 
 FT3_PATTERN = re.compile(
@@ -123,6 +123,77 @@ ALT_COMPARISON_MODEL_RECIPE_STR = "c4"
 ALT_COMPARISON_MODEL_RECIPE = "C4"
 FINETUNE_PATTERN = r"(\d+M)tx(\d+)"
 DD_PATTERN = r"DD-([^-]+)-(\d+M)-(\d+)-(\d+)"
+
+DEFAULTS = {
+    "comparison_model_recipe": "Dolma1.7",
+    "num_finetune_epochs": "1",
+    "initial_checkpoint_steps": "main",
+}
+
+RECIPE_MAPPING = {
+    "d17": "Dolma1.7",
+    "d16": "Dolma1.6++",
+    "c4": "C4",
+    "dclm": "DCLM-Baseline",
+    "dclm_qc10p": "DCLM-Baseline (QC 10%)",
+    "dclm_qc20p": "DCLM-Baseline (QC 20%)",
+    "dclm_qc7p_fw2": "DCLM-Baseline (QC 7%, FW2)",
+    "dclm_qc7p_fw3": "DCLM-Baseline (QC 7%, FW3)",
+    "dclm_qcfw10p": "DCLM-Baseline (QC FW 10%)",
+    "dclm_qcfw3p": "DCLM-Baseline (QC FW 3%)",
+    "dclm25_dolma75": "DCLM-Baseline 25% / Dolma 75%",
+    "dclm50_dolma50": "DCLM-Baseline 50% / Dolma 50%",
+    "dclm75_dolma25": "DCLM-Baseline 75% / Dolma 25%",
+    "dclm_25_d17_75": "DCLM-Baseline 25% / Dolma 75%",
+    "dclm_50_d17_50": "DCLM-Baseline 50% / Dolma 50%",
+    "dclm_75_d17_25": "DCLM-Baseline 75% / Dolma 25%",
+    "falcon": "Falcon",
+    "falcon_cc": "Falcon+CC",
+    "falcon_cc_qc10p": "Falcon+CC (QC 10%)",
+    "falcon_cc_qc20p": "Falcon+CC (QC 20%)",
+    "falcon_cc_qcorig10p": "Falcon+CC (QC Orig 10%)",
+    "falcon_cc_qctulu10p": "Falcon+CC (QC Tulu 10%)",
+    "fineweb_edu": "FineWeb-Edu",
+    "fineweb_pro": "FineWeb-Pro",
+    "dolma1_7": "Dolma1.7",
+    "dclm_qc7fw2": "DCLM-Baseline (QC 7%, FW2)",
+    "dclm_qc7fw3": "DCLM-Baseline (QC 7%, FW3)",
+    "dclm-baseline": "DCLM-Baseline",
+    "dclm-baseline-qc-10p": "DCLM-Baseline (QC 10%)",
+    "dclm-baseline-qc-20p": "DCLM-Baseline (QC 20%)",
+    "dclm-baseline-qc-7p-fw2": "DCLM-Baseline (QC 7%, FW2)",
+    "dclm-baseline-qc-7p-fw3": "DCLM-Baseline (QC 7%, FW3)",
+    "dclm-baseline-qc-fw-10p": "DCLM-Baseline (QC FW 10%)",
+    "dclm-baseline-qc-fw-3p": "DCLM-Baseline (QC FW 3%)",
+    "Dolma 1.7": "Dolma1.7",
+    "Dolma 1.6": "Dolma1.6++",
+    "C4": "C4",
+    "DCLM": "DCLM-Baseline",
+    "DCLM Baseline": "DCLM-Baseline",
+    "Falcon": "Falcon",
+    "FineWeb": "FineWeb-Edu",
+}
+
+
+def convert_string_to_number(value_str: str) -> float | None:
+    if pd.isna(value_str):
+        return None
+    value_str = str(value_str).strip().upper()
+    if value_str == "N/A" or value_str == "":
+        return None
+    try:
+        if value_str.endswith("M"):
+            return float(value_str[:-1]) * 1_000_000
+        elif value_str.endswith("G"):
+            return float(value_str[:-1]) * 1_000_000_000
+        elif value_str.endswith("B"):
+            return float(value_str[:-1]) * 1_000_000_000
+        elif value_str.endswith("T"):
+            return float(value_str[:-2]) * 1_000_000_000_000
+        else:
+            return float(value_str)
+    except (ValueError, TypeError):
+        return None
 
 
 def classify_run_id_type_and_extract(run_id: str) -> tuple[str, dict[str, str | None]]:
@@ -211,16 +282,59 @@ def convert_groups_to_dataframes(
     return dataframes
 
 
+def extract_config_fields(
+    runs_df: pd.DataFrame, run_ids: list[str], field_mapping: dict[str, str]
+) -> dict[str, Any]:
+    import json
+
+    config_data = {}
+
+    for run_id in run_ids:
+        run_row = runs_df[runs_df["run_id"] == run_id]
+        if run_row.empty:
+            continue
+
+        try:
+            config = json.loads(run_row.iloc[0]["config"])
+            for target_field, config_field in field_mapping.items():
+                if config_field in config and config[config_field] is not None:
+                    if run_id not in config_data:
+                        config_data[run_id] = {}
+                    config_data[run_id][target_field] = config[config_field]
+        except (json.JSONDecodeError, ValueError, KeyError):
+            pass
+
+        if "summary" in run_row.columns and not run_row["summary"].isna().iloc[0]:
+            try:
+                summary = json.loads(run_row.iloc[0]["summary"])
+                if "total_tokens" in summary and summary["total_tokens"] is not None:
+                    if run_id not in config_data:
+                        config_data[run_id] = {}
+                    config_data[run_id]["num_finetuned_tokens_real"] = summary["total_tokens"]
+            except (json.JSONDecodeError, ValueError, KeyError):
+                pass
+
+    return config_data
+
+
 def apply_processing(
     dataframes: dict[str, pd.DataFrame],
     defaults: dict[str, Any] | None = None,
     column_map: dict[str, str] | None = None,
+    runs_df: pd.DataFrame | None = None,
+    history_df: pd.DataFrame | None = None,
 ) -> dict[str, pd.DataFrame]:
     if defaults is None:
-        defaults = {}
+        defaults = DEFAULTS
     if column_map is None:
         column_map = {}
 
+    recipe_columns = ["comparison_model_recipe", "initial_checkpoint_recipe"]
+    config_field_mapping = {
+        "lr": "learning_rate",
+        "seed": "seed",
+        "num_finetune_epochs": "num_train_epochs",
+    }
     processed = {}
 
     for run_type, df in dataframes.items():
@@ -233,6 +347,86 @@ def apply_processing(
         for col, default_val in defaults.items():
             if col in processed_df.columns:
                 processed_df[col] = processed_df[col].fillna(default_val)
+
+        for recipe_col in recipe_columns:
+            if recipe_col in processed_df.columns:
+                processed_df[recipe_col] = processed_df[recipe_col].map(
+                    lambda x: RECIPE_MAPPING.get(x, x) if pd.notna(x) else x
+                )
+
+        if runs_df is not None and "run_id" in processed_df.columns:
+            run_ids = processed_df["run_id"].tolist()
+            config_data = extract_config_fields(runs_df, run_ids, config_field_mapping)
+
+            for run_id, fields in config_data.items():
+                run_idx = processed_df[processed_df["run_id"] == run_id].index
+                if not run_idx.empty:
+                    for field, value in fields.items():
+                        if field == "num_finetuned_tokens_real":
+                            if field not in processed_df.columns:
+                                processed_df[field] = None
+                            processed_df.loc[run_idx[0], field] = value
+                        elif field in processed_df.columns:
+                            # Only fill if current value is null
+                            current_val = processed_df.loc[run_idx[0], field]
+                            if pd.isna(current_val) or current_val == "N/A":
+                                processed_df.loc[run_idx[0], field] = str(value)
+
+        if "timestamp" in processed_df.columns:
+            def convert_timestamp(ts_str: str) -> pd.Timestamp | None:
+                if pd.isna(ts_str):
+                    return None
+                ts_str = str(ts_str)
+                if "_" in ts_str:
+                    try:
+                        return pd.to_datetime(ts_str, format="%Y_%m_%d-%H_%M_%S")
+                    except (ValueError, TypeError):
+                        return None
+                else:
+                    try:
+                        return pd.to_datetime(ts_str, format="%y%m%d-%H%M%S")
+                    except (ValueError, TypeError):
+                        return None
+
+            processed_df["timestamp"] = processed_df["timestamp"].apply(convert_timestamp)
+
+        if "num_finetune_tokens" in processed_df.columns:
+            processed_df["num_finetune_tokens"] = processed_df["num_finetune_tokens"].apply(convert_string_to_number)
+
+        if "num_finetune_tokens_per_epoch" in processed_df.columns:
+            processed_df["num_finetune_tokens_per_epoch"] = processed_df["num_finetune_tokens_per_epoch"].apply(convert_string_to_number)
+
+        if "num_finetuned_tokens_real" in processed_df.columns:
+            processed_df["num_finetuned_tokens_real"] = processed_df["num_finetuned_tokens_real"].apply(convert_string_to_number)
+
+        if ("num_finetune_tokens_per_epoch" in processed_df.columns and
+            "num_finetune_epochs" in processed_df.columns):
+            if "num_finetune_tokens" not in processed_df.columns:
+                processed_df["num_finetune_tokens"] = None
+
+            processed_df["num_finetune_epochs"] = pd.to_numeric(processed_df["num_finetune_epochs"], errors="coerce")
+
+            mask = (processed_df["num_finetune_tokens_per_epoch"].notna() &
+                   processed_df["num_finetune_epochs"].notna() &
+                   processed_df["num_finetune_tokens"].isna())
+
+            processed_df.loc[mask, "num_finetune_tokens"] = (
+                processed_df.loc[mask, "num_finetune_tokens_per_epoch"] *
+                processed_df.loc[mask, "num_finetune_epochs"]
+            )
+
+        if ("num_finetune_tokens" in processed_df.columns and
+            "num_finetuned_tokens_real" in processed_df.columns):
+            mask = (processed_df["num_finetune_tokens"].notna() &
+                   processed_df["num_finetuned_tokens_real"].notna() &
+                   (processed_df["num_finetune_tokens"] != 0))
+
+            processed_df["abs_difference_ft_tokens_pct"] = None
+            processed_df.loc[mask, "abs_difference_ft_tokens_pct"] = (
+                abs(processed_df.loc[mask, "num_finetune_tokens"] -
+                    processed_df.loc[mask, "num_finetuned_tokens_real"]) /
+                processed_df.loc[mask, "num_finetune_tokens"] * 100
+            )
 
         processed[run_type] = processed_df
 
