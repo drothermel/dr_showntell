@@ -7,7 +7,8 @@ import pandas as pd
 from rich.console import Console
 
 from dr_showntell.fancy_table import FancyTable
-from dr_showntell.datadec_utils import load_data, parse_run_id_components, classify_run_id_type_and_extract
+from dr_showntell.datadec_utils import load_data
+from dr_showntell.run_id_parsing import parse_and_group_run_ids, convert_groups_to_dataframes, apply_processing
 
 console = Console()
 
@@ -36,26 +37,13 @@ def safe_truncate(value: str | None, max_len: int) -> str:
 def analyze_run_types(runs_df: pd.DataFrame) -> None:
     console.print(f"\n[bold blue]Run ID Type Classification Analysis[/bold blue]")
 
+    grouped_data = parse_and_group_run_ids(runs_df)
+    type_dataframes = convert_groups_to_dataframes(grouped_data)
+    processed_dataframes = apply_processing(type_dataframes, defaults={}, column_map={})
+
     all_run_ids = runs_df['run_id'].tolist()
-
-    type_groups = {}
-    type_data = {}
-
-    for run_id in all_run_ids:
-        run_type, extracted_data = classify_run_id_type_and_extract(run_id)
-
-        if run_type not in type_groups:
-            type_groups[run_type] = []
-            type_data[run_type] = []
-
-        type_groups[run_type].append(run_id)
-
-        if run_type != "old":
-            extracted_data['run_id'] = run_id
-            type_data[run_type].append(extracted_data)
-
     console.print(f"Total runs analyzed: [cyan]{len(all_run_ids):,}[/cyan]")
-    console.print(f"Run types found: [yellow]{len(type_groups)}[/yellow]")
+    console.print(f"Run types found: [yellow]{len(grouped_data)}[/yellow]")
 
     type_colors = {
         'matched': 'green',
@@ -67,6 +55,16 @@ def analyze_run_types(runs_df: pd.DataFrame) -> None:
         'other': 'dim'
     }
 
+    type_counts = {}
+    for run_type, data_list in grouped_data.items():
+        if run_type == "old":
+            from dr_showntell.run_id_parsing import classify_run_id_type_and_extract
+            old_count = sum(1 for run_id in all_run_ids
+                          if classify_run_id_type_and_extract(run_id)[0] == "old")
+            type_counts[run_type] = old_count
+        else:
+            type_counts[run_type] = len(data_list)
+
     table = FancyTable(
         title="Run ID Type Summary",
         show_header=True,
@@ -77,24 +75,32 @@ def analyze_run_types(runs_df: pd.DataFrame) -> None:
     table.add_column("Count", justify="right", style="cyan")
     table.add_column("Example Run ID", style="dim")
 
-    for run_type in sorted(type_groups.keys(), key=lambda x: len(type_groups[x]), reverse=True):
-        run_ids = sorted(type_groups[run_type])
+    for run_type in sorted(type_counts.keys(), key=lambda x: type_counts[x], reverse=True):
+        count = type_counts[run_type]
         color = type_colors.get(run_type, 'white')
-        example_run_id = run_ids[0]
+
+        if run_type == "old":
+            from dr_showntell.run_id_parsing import classify_run_id_type_and_extract
+            example_run_id = next(run_id for run_id in all_run_ids
+                                if classify_run_id_type_and_extract(run_id)[0] == "old")
+        elif run_type in grouped_data and grouped_data[run_type]:
+            example_run_id = grouped_data[run_type][0]['run_id']
+        else:
+            example_run_id = "N/A"
 
         table.add_row(
             f"[{color}]{run_type}[/{color}]",
-            f"{len(run_ids):,}",
+            f"{count:,}",
             example_run_id
         )
 
     console.print(table)
 
-    if "other" in type_groups:
-        run_ids = sorted(type_groups["other"])
+    if "other" in grouped_data:
+        other_run_ids = [item['run_id'] for item in grouped_data["other"]]
         color = type_colors.get("other", 'dim')
 
-        console.print(f"\n[bold {color}]OTHER Run IDs ({len(run_ids)} total):[/bold {color}]")
+        console.print(f"\n[bold {color}]OTHER Run IDs ({len(other_run_ids)} total):[/bold {color}]")
 
         detail_table = FancyTable(
             title=f"OTHER Run IDs",
@@ -104,38 +110,28 @@ def analyze_run_types(runs_df: pd.DataFrame) -> None:
 
         detail_table.add_column("Run ID", style=color)
 
-        for run_id in run_ids:
+        for run_id in sorted(other_run_ids):
             detail_table.add_row(run_id)
 
         console.print(detail_table)
 
-    for run_type in sorted(type_data.keys(), key=lambda x: len(type_data[x]), reverse=True):
-        if run_type != "old" and type_data[run_type]:
-            df = pd.DataFrame(type_data[run_type])
+    for run_type in sorted(processed_dataframes.keys(), key=lambda x: len(processed_dataframes[x]), reverse=True):
+        df = processed_dataframes[run_type]
+        color = type_colors.get(run_type, 'white')
 
-            if 'pattern_name' in df.columns:
-                df = df.sort_values('pattern_name')
+        console.print(f"\n[bold {color}]{run_type.upper()} Detailed Analysis ({len(df)} runs):[/bold {color}]")
 
-            columns = ['run_id'] + [col for col in df.columns if col != 'run_id']
-            df = df[columns]
+        detail_table = FancyTable(
+            title=f"{run_type.upper()} - Extracted Components",
+            show_header=True,
+            header_style=f"bold {color}"
+        )
 
-            color = type_colors.get(run_type, 'white')
+        for col in df.columns:
+            detail_table.add_column(col, style="dim" if col == "run_id" else "")
 
-            console.print(f"\n[bold {color}]{run_type.upper()} Detailed Analysis ({len(df)} runs):[/bold {color}]")
-
-            detail_table = FancyTable(
-                title=f"{run_type.upper()} - Extracted Components",
-                show_header=True,
-                header_style=f"bold {color}"
-            )
-
-            for col in df.columns:
-                detail_table.add_column(col, style="dim" if col == "run_id" else "")
-
-            for _, row in df.iterrows():
-                detail_table.add_row(*[str(row[col]) if pd.notna(row[col]) else "N/A" for col in df.columns])
-
-            #console.print(detail_table)
+        for _, row in df.iterrows():
+            detail_table.add_row(*[str(row[col]) if pd.notna(row[col]) else "N/A" for col in df.columns])
 
 def analyze_run_matching(runs_df: pd.DataFrame, matched_data: list[dict], pickle_filepath: str) -> None:
     console.print(f"\n[bold blue]Run Matching Analysis[/bold blue]")
