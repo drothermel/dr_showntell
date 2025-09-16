@@ -1,5 +1,6 @@
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
-from typing import Iterable, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal
 
 from rich._loop import loop_first_last, loop_last
 from rich._pick import pick_bool
@@ -13,7 +14,7 @@ from rich.text import Text
 class FancyBox(Box):
     """Extended Box class that supports multiple header rows."""
 
-    def __init__(self, base_box: Box, num_header_rows: int = 1):
+    def __init__(self, base_box: Box, num_header_rows: int = 1) -> None:
         super().__init__(str(base_box))
         self.num_header_rows = num_header_rows
         self.base_box = base_box
@@ -43,7 +44,7 @@ class FancyBox(Box):
             edge=edge,
         )
 
-        def fill_breaks(breaks, rind):
+        def fill_breaks(breaks: Any, rind: Any) -> None:
             last_w = 0
             for w in fixed_fancy_widths[rind]:
                 last_w += w
@@ -107,7 +108,7 @@ class FancyBox(Box):
                 "level must be 'head', 'head-to-row', 'row', 'mid' or 'foot'"
             )
 
-        parts: List[str] = []
+        parts: list[str] = []
         append = parts.append
         if edge:
             append(left)
@@ -122,18 +123,18 @@ class FancyBox(Box):
 
 @dataclass
 class HeaderCell:
-    content: Union[str, Text]
+    content: str | Text
     span: int = 1  # Number of columns this header spans
-    style: Optional[StyleType] = None
+    style: StyleType | None = None
 
 
 class FancyTable(Table):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.fancy_headers: List[List[HeaderCell]] = []
-        self._fancy_box: Optional[FancyBox] = None
+        self.fancy_headers: list[list[HeaderCell]] = []
+        self._fancy_box: FancyBox | None = None
 
-    def add_header_row(self, *headers: Union[str, HeaderCell]) -> None:
+    def add_header_row(self, *headers: str | HeaderCell) -> None:
         cells = []
         for header in headers:
             if isinstance(header, str):
@@ -145,14 +146,14 @@ class FancyTable(Table):
         self.fancy_headers.append(cells)
         self._update_fancy_box()
 
-    def _update_fancy_box(self):
+    def _update_fancy_box(self) -> None:
         if self.box and len(self.fancy_headers) > 0:
             self._fancy_box = FancyBox(
                 self.box, num_header_rows=len(self.fancy_headers)
             )
 
     def create_spanned_header(
-        self, content: Union[str, Text], span: int, style: Optional[StyleType] = None
+        self, content: str | Text, span: int, style: StyleType | None = None
     ) -> HeaderCell:
         return HeaderCell(content=content, span=span, style=style)
 
@@ -169,7 +170,7 @@ class FancyTable(Table):
     def _is_last_header_row(self, index: int) -> bool:
         return index == self._get_header_count() - 1
 
-    def _get_span_info_for_row(self, header_row_index: int) -> List[Tuple[int, int]]:
+    def _get_span_info_for_row(self, header_row_index: int) -> list[tuple[int, int]]:
         if header_row_index >= len(self.fancy_headers):
             return []
         header_row = self.fancy_headers[header_row_index]
@@ -183,7 +184,7 @@ class FancyTable(Table):
 
     def _is_column_spanned(
         self, header_row_index: int, column_index: int
-    ) -> Tuple[bool, int]:
+    ) -> tuple[bool, int]:
         spans = self._get_span_info_for_row(header_row_index)
 
         for start_col, span_length in spans:
@@ -193,7 +194,7 @@ class FancyTable(Table):
         return False, -1
 
     def _should_skip_divider(
-        self, cell_index: int, span_info: List[Tuple[int, int]]
+        self, cell_index: int, span_info: list[tuple[int, int]]
     ) -> bool:
         divider_column = cell_index
         for start_col, span_length in span_info:
@@ -205,8 +206,8 @@ class FancyTable(Table):
         self,
         cell_index: int,
         default_width: int,
-        all_widths: List[int],
-        span_info: List[Tuple[int, int]],
+        all_widths: list[int],
+        span_info: list[tuple[int, int]],
     ) -> int:
         for start_col, span_length in span_info:
             if cell_index == start_col:
@@ -218,7 +219,9 @@ class FancyTable(Table):
                 return 0
         return default_width
 
-    def _get_cells(self, console, column_index: int, column):
+    def _get_cells(  # noqa: C901
+        self, console: Any, column_index: int, column: Any
+    ) -> Generator[Any, Any, Any]:
         if not self.fancy_headers:
             yield from super()._get_cells(console, column_index, column)
             return
@@ -233,7 +236,7 @@ class FancyTable(Table):
 
         _padding_cache = {}
 
-        def get_padding(first_row: bool, last_row: bool) -> Tuple[int, int, int, int]:
+        def get_padding(first_row: bool, last_row: bool) -> tuple[int, int, int, int]:
             cached = _padding_cache.get((first_row, last_row))
             if cached:
                 return cached
@@ -258,12 +261,12 @@ class FancyTable(Table):
             _padding_cache[(first_row, last_row)] = _padding
             return _padding
 
-        raw_cells: List[Tuple[StyleType, str]] = []
+        raw_cells: list[tuple[StyleType, str]] = []
         _append = raw_cells.append
         get_style = console.get_style
 
         if self.show_header and self.fancy_headers:
-            for row_index, header_row in enumerate(self.fancy_headers):
+            for _row_index, header_row in enumerate(self.fancy_headers):
                 header_content = self._get_header_content_for_column(
                     column_index, header_row
                 )
@@ -301,28 +304,32 @@ class FancyTable(Table):
                 )
 
     def _get_header_content_for_column(
-        self, column_index: int, header_row: List[HeaderCell]
+        self, column_index: int, header_row: list[HeaderCell]
     ) -> str:
         current_col = 0
         for cell in header_row:
             if current_col <= column_index < current_col + cell.span:
-                if cell.span == 1:
+                if cell.span == 1 or column_index == current_col:
                     return str(cell.content)
                 else:
-                    if column_index == current_col:
-                        return str(cell.content)
-                    else:
-                        return ""
+                    return ""
             current_col += cell.span
         return ""
 
     def _render_row_content_loop(
-        self, console, options, widths, row_cell, columns, max_height, row_style
-    ):
+        self,
+        console: Any,
+        options: Any,
+        widths: list[int],
+        row_cell: list[Any],
+        columns: list[Any],
+        max_height: int,
+        row_style: StyleType,
+    ) -> list[list[Segment]]:
         cells = []
         get_style = console.get_style
-        for cell_index, (width, cell, column) in enumerate(
-            zip(widths, row_cell, columns)
+        for _cell_index, (width, cell, column) in enumerate(
+            zip(widths, row_cell, columns, strict=False)
         ):
             render_options = options.update(
                 width=width,
@@ -341,7 +348,9 @@ class FancyTable(Table):
             cells.append(lines)
         return cells
 
-    def _get_header_row_separator(self, box, fancy_widths, row_index, show_edge):
+    def _get_header_row_separator(
+        self, box: Any, fancy_widths: list[int], row_index: int, show_edge: bool
+    ) -> str:
         if self._fancy_box and self.fancy_headers:
             return self._fancy_box.get_header_separator(
                 fancy_widths=fancy_widths,
@@ -351,14 +360,18 @@ class FancyTable(Table):
             )
         return box.get_row(fancy_widths[row_index], "head", edge=show_edge)
 
-    def _get_col_dividers(self, box_segments, row_index, last_row):
+    def _get_col_dividers(
+        self, box_segments: list[Segment], row_index: int, last_row: bool
+    ) -> Segment:
         if last_row:
             return box_segments[2]
         if self._is_header_row(row_index):
             return box_segments[0]
         return box_segments[1]
 
-    def _render(self, console, options, widths):
+    def _render(  # noqa: C901, PLR0912, PLR0915
+        self, console: Any, options: Any, widths: list[int]
+    ) -> Generator[Any, Any, Any]:
         table_style = console.get_style(self.style or "")
         border_style = table_style + console.get_style(self.border_style or "")
 
@@ -366,7 +379,7 @@ class FancyTable(Table):
             self._get_cells(console, column_index, column)
             for column_index, column in enumerate(self.columns)
         )
-        row_cells: List[Tuple[_Cell, ...]] = list(zip(*_column_cells))
+        row_cells: list[tuple[_Cell, ...]] = list(zip(*_column_cells, strict=False))
 
         fancy_widths = []
         fancy_spans = []
@@ -434,7 +447,7 @@ class FancyTable(Table):
         get_row_style = self.get_row_style
         get_style = console.get_style
 
-        for row_index, (first_row, last_row, row_cell) in enumerate(
+        for row_index, (_first_row, last_row, row_cell) in enumerate(
             loop_first_last(row_cells)
         ):
             is_header_row = self._is_header_row(row_index) and show_header
@@ -474,16 +487,18 @@ class FancyTable(Table):
             )
             row_height = max(len(cell) for cell in cells)
 
-            def align_cell(cell, vertical, width, style):
-                if is_header_row:
+            def align_cell(
+                cell: Any, vertical: str, width: int, style: StyleType
+            ) -> Any:
+                if is_header_row:  # noqa: B023
                     vertical = "bottom"
-                elif is_footer_row:
+                elif is_footer_row:  # noqa: B023
                     vertical = "top"
                 if vertical == "top":
-                    return _Segment.align_top(cell, width, row_height, style)
+                    return _Segment.align_top(cell, width, row_height, style)  # noqa: B023
                 elif vertical == "middle":
-                    return _Segment.align_middle(cell, width, row_height, style)
-                return _Segment.align_bottom(cell, width, row_height, style)
+                    return _Segment.align_middle(cell, width, row_height, style)  # noqa: B023
+                return _Segment.align_bottom(cell, width, row_height, style)  # noqa: B023
 
             cells[:] = [
                 _Segment.set_shape(
@@ -497,7 +512,7 @@ class FancyTable(Table):
                     max_height,
                 )
                 for width, _cell, cell, column in zip(
-                    fancy_widths[row_index], row_cell, cells, columns
+                    fancy_widths[row_index], row_cell, cells, columns, strict=False
                 )
             ]
 
@@ -553,23 +568,22 @@ class FancyTable(Table):
                 yield new_line
 
             end_section = basic_row_data and basic_row_data.end_section
-            if _box and (show_lines or leading or end_section):
-                if (
-                    not last_row
-                    and not (show_footer and row_index >= len(row_cells) - 2)
-                    and not (show_header and is_header_row)
-                ):
-                    if leading:
-                        yield _Segment(
-                            _box.get_row(widths, "mid", edge=show_edge) * leading,
-                            border_style,
-                        )
-                    else:
-                        yield _Segment(
-                            _box.get_row(widths, "row", edge=show_edge),
-                            border_style,
-                        )
-                    yield new_line
+            if (_box and (show_lines or leading or end_section)) and (
+                not last_row
+                and not (show_footer and row_index >= len(row_cells) - 2)
+                and not (show_header and is_header_row)
+            ):
+                if leading:
+                    yield _Segment(
+                        _box.get_row(widths, "mid", edge=show_edge) * leading,
+                        border_style,
+                    )
+                else:
+                    yield _Segment(
+                        _box.get_row(widths, "row", edge=show_edge),
+                        border_style,
+                    )
+                yield new_line
 
         if _box and show_edge:
             yield _Segment(_box.get_bottom(widths), border_style)
