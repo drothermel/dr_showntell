@@ -14,12 +14,38 @@ This file provides project level guidance to Claude Code (claude.ai/code) when w
 
 Remember: The goal is code that *disappears* into the background, allowing researchers to focus on their work.
 
+## 🏗️ ARCHITECTURE OVERVIEW
+
+### Core Components
+**dr_showntell** is a presentation and reporting utility library built on rich console output:
+
+- **console_components.py**: Rich-based UI components (TitlePanel, SectionRule, MetricDisplay) for structured console output
+- **table_formatter.py**: Configurable table formatting with YAML-based style configs, multiple output formats (console/markdown/latex)
+- **fancy_table.py**: Extended Rich Table with multi-level headers and custom box drawing
+
+### Key Dependencies and Integration
+- **dr-plotter>=0.1.2**: Core plotting library this package extends
+- **Rich**: All console rendering and styling
+- **pandas**: DataFrame handling and processing
+- **tabulate**: Fallback table formatting for non-Rich outputs
+
+### Configuration System
+- **configs/table_formats/**: YAML files defining table formatting rules
+- **Configurable formatters**: scientific, decimal, integer, comma, truncate, string
+- **Multi-format output**: console (grid), markdown (pipe), latex, plain, csv
+
+### Design Patterns
+- **Rich renderables**: All display components implement `__rich_console__` protocol
+- **Configuration-driven formatting**: Table styles defined in YAML, loaded dynamically
+- **Type-safe formatters**: Strongly typed formatting functions with precision control
+- **Extensible display system**: New console components follow Rich's renderable pattern
+
 ## Essential Commands
-- `us` runs `uv sync` - Install all dependencies including dev, test, and test-ml groups
-- `lint` runs `uv run ruff check --fix .` - Lint code with ruff and apply autofixes where possible
-- `ft` runs `uv run ruff format .` - Format code with ruff  
-- `uv run pytest` - Run tests with pytest (supports parallel execution with xdist)
-- `lint_fix` - Run ruff format and then check with --fix
+- `uv sync` - Install all dependencies (dev group includes pytest)
+- `uv run ruff check --fix .` - Lint code with ruff and apply autofixes
+- `uv run ruff format .` - Format code with ruff
+- `uv run pytest` - Run tests (pytest configured in dev dependencies)
+- `uv run python -m dr_showntell` - Run module if it has __main__ entry point
 
 **IMPORTANT**: Do NOT run tests, linting, type checking, or formatting unless explicitly requested by the user. Focus on the requested changes only.
 
