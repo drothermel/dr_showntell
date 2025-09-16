@@ -262,6 +262,8 @@ def extract_and_pickle_matched_run_data(runs_df: pd.DataFrame, history_df: pd.Da
 
     run_ids_with_history = []
     for run_id in all_run_ids:
+        if "_match_" not in run_id:
+            continue
         history_data = runids_match_df(history_df, run_id)
         if len(history_data) > 0:
             run_ids_with_history.append(run_id)
