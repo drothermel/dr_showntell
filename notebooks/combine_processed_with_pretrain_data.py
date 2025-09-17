@@ -30,13 +30,9 @@ def get_pretrained_data_counts(pretrain_df: pd.DataFrame, model_size: str | None
     return len(filtered_df)
 
 
-def combine_processed_with_pretrain_data() -> None:
-    console.print(f"[bold blue]🔄 Combining Processed Runs with Pretraining Data[/bold blue]")
-
+def load_datasets() -> tuple[dict, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     pickle_files = sorted(Path('data').glob('*_modernized_run_data.pkl'))
-    if not pickle_files:
-        console.print("[red]No modernized pickle files found in data/ directory[/red]")
-        return
+    assert pickle_files, "No modernized pickle files found in data/ directory"
 
     latest_file = pickle_files[-1]
     console.print(f"Loading processed data from: [cyan]{latest_file}[/cyan]")
@@ -47,9 +43,13 @@ def combine_processed_with_pretrain_data() -> None:
     pretrain_df, runs_df, history_df = load_data()
     console.print(f"Loaded raw data: pretrain({len(pretrain_df):,}), runs({len(runs_df):,}), history({len(history_df):,})")
 
-    processed_runs = processed_data['processed_runs']
-    console.print(f"Processing {len(processed_runs):,} runs...")
+    return processed_data, pretrain_df, runs_df, history_df
 
+
+def analyze_run_data_availability(
+    processed_runs: list[dict], pretrain_df: pd.DataFrame, runs_df: pd.DataFrame, history_df: pd.DataFrame
+) -> list[dict]:
+    console.print(f"Processing {len(processed_runs):,} runs...")
     analysis_results = []
 
     for i, run in enumerate(processed_runs):
@@ -57,7 +57,6 @@ def combine_processed_with_pretrain_data() -> None:
             console.print(f"  Processing run {i+1}/{len(processed_runs)}...")
 
         run_id = run['run_id']
-
         comparison_size = run.get('comparison_model_size')
         comparison_recipe = run.get('comparison_model_recipe')
         initial_size = run.get('initial_checkpoint_size')
@@ -66,7 +65,6 @@ def combine_processed_with_pretrain_data() -> None:
 
         history_rows = len(filter_by_run_id(history_df, run_id))
 
-        # Get run state from runs_df
         runs_row = filter_by_run_id(runs_df, run_id)
         run_state = "N/A"
         if not runs_row.empty:
@@ -102,10 +100,12 @@ def combine_processed_with_pretrain_data() -> None:
         })
 
     console.print(f"[green]✓ Analysis complete for {len(analysis_results)} runs[/green]")
+    return analysis_results
 
+
+def display_analysis_results(analysis_results: list[dict]) -> None:
     console.print(f"\n[bold blue]📊 Combined Data Analysis Results[/bold blue]")
 
-    # Get run state statistics
     run_states = {}
     for r in analysis_results:
         state = r['run_state']
@@ -131,6 +131,11 @@ def combine_processed_with_pretrain_data() -> None:
     for state, count in sorted(summary_stats['run_states'].items(), key=lambda x: x[1], reverse=True):
         console.print(f"  • {state}: [yellow]{count:,}[/yellow] ({count/summary_stats['total_runs']*100:.1f}%)")
 
+    display_complete_results_table(analysis_results)
+    display_run_type_breakdown(analysis_results)
+
+
+def display_complete_results_table(analysis_results: list[dict]) -> None:
     console.print(f"\n[bold green]📋 Complete Results Table (all {len(analysis_results)} runs):[/bold green]")
 
     table = FancyTable(
@@ -168,6 +173,8 @@ def combine_processed_with_pretrain_data() -> None:
 
     console.print(table)
 
+
+def display_run_type_breakdown(analysis_results: list[dict]) -> None:
     console.print(f"\n[bold blue]📈 Run Type Breakdown:[/bold blue]")
 
     type_analysis = {}
@@ -234,14 +241,27 @@ def combine_processed_with_pretrain_data() -> None:
 
     console.print(type_table)
 
+
+def save_combined_analysis(analysis_results: list[dict], extraction_timestamp: str) -> None:
     console.print(f"\n[bold blue]💾 Saving combined analysis results...[/bold blue]")
 
     combined_df = pd.DataFrame(analysis_results)
-    output_file = f"data/combined_analysis_{processed_data['metadata']['extraction_timestamp']}.parquet"
+    output_file = f"data/combined_analysis_{extraction_timestamp}.parquet"
     combined_df.to_parquet(output_file, index=False)
 
     console.print(f"[green]✓ Saved combined analysis to: {output_file}[/green]")
     console.print(f"[dim]Columns: {list(combined_df.columns)}[/dim]")
+
+
+def combine_processed_with_pretrain_data() -> None:
+    console.print(f"[bold blue]🔄 Combining Processed Runs with Pretraining Data[/bold blue]")
+
+    processed_data, pretrain_df, runs_df, history_df = load_datasets()
+    processed_runs = processed_data['processed_runs']
+
+    analysis_results = analyze_run_data_availability(processed_runs, pretrain_df, runs_df, history_df)
+    display_analysis_results(analysis_results)
+    save_combined_analysis(analysis_results, processed_data['metadata']['extraction_timestamp'])
 
 
 if __name__ == "__main__":
