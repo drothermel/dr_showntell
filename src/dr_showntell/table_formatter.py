@@ -1,12 +1,13 @@
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import yaml
 from rich.table import Table
 from tabulate import tabulate
 
-from datadec.constants import CONFIGS_DIR
-
+CONFIGS_DIR = Path(__file__).parent.parent / "configs"
 TABLE_FORMATS_DIR = CONFIGS_DIR / "table_formats"
 
 OUTPUT_FORMATS = {
@@ -36,7 +37,7 @@ FORMATTER_TYPES: dict[str, Callable] = {
 def load_table_config(config_name: str) -> dict[str, dict]:
     config_file = TABLE_FORMATS_DIR / f"{config_name}.yaml"
     if config_file.exists():
-        with open(config_file, "r") as f:
+        with config_file.open() as f:
             return yaml.safe_load(f)
     else:
         return {}
@@ -51,14 +52,14 @@ COVERAGE_TABLE_CONFIG = {
 
 
 def format_table(
-    data: Union[list[dict], pd.DataFrame, list[list]],
-    headers: Optional[list[str]] = None,
+    data: list[dict] | pd.DataFrame | list[list],
+    headers: list[str] | None = None,
     output_format: str = "console",
-    column_config: Optional[dict[str, dict]] = None,
-    title: Optional[str] = None,
+    column_config: dict[str, dict] | None = None,
+    title: str | None = None,
     table_style: str = "lines",
     disable_numparse: bool = True,
-) -> Union[str, Table]:
+) -> str | Table:
     processed_data = _preprocess_data(data)
     column_names = _get_column_names(data)
     config = column_config or {}
@@ -79,9 +80,9 @@ def format_table(
         )
 
 
-def _preprocess_data(data: Union[list[dict], pd.DataFrame, list[list]]) -> list[list]:
+def _preprocess_data(data: list[dict] | pd.DataFrame | list[list]) -> list[list]:
     if isinstance(data, pd.DataFrame):
-        return data.values.tolist()
+        return data.to_numpy().tolist()
     elif isinstance(data, list) and len(data) > 0:
         if isinstance(data[0], dict):
             if len(data) == 0:
@@ -93,7 +94,7 @@ def _preprocess_data(data: Union[list[dict], pd.DataFrame, list[list]]) -> list[
     return []
 
 
-def _get_column_names(data: Union[list[dict], pd.DataFrame, list[list]]) -> list[str]:
+def _get_column_names(data: list[dict] | pd.DataFrame | list[list]) -> list[str]:
     if isinstance(data, pd.DataFrame):
         return list(data.columns)
     elif isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
@@ -103,7 +104,9 @@ def _get_column_names(data: Union[list[dict], pd.DataFrame, list[list]]) -> list
 
 
 def _apply_column_formatting(
-    processed_data: list[list], config: dict[str, dict], column_names: list[str] = None
+    processed_data: list[list],
+    config: dict[str, dict],
+    column_names: list[str] | None = None,
 ) -> list[list]:
     if not processed_data:
         return processed_data
@@ -122,8 +125,8 @@ def _apply_column_formatting(
 
 
 def _format_value(
-    value,
-    col_name: Optional[str],
+    value: Any,
+    col_name: str | None,
     config: dict[str, dict],
     formatter_types: dict[str, Callable],
 ) -> str:
@@ -142,7 +145,7 @@ def _format_value(
 
 
 def _resolve_headers(
-    headers: Optional[list[str]], column_names: list[str], config: dict[str, dict]
+    headers: list[str] | None, column_names: list[str], config: dict[str, dict]
 ) -> list[str]:
     if headers is not None:
         return headers
@@ -161,7 +164,7 @@ def _resolve_headers(
 
 def format_dynamics_table(
     dynamics_list: list[dict],
-    columns: list[str] = None,
+    columns: list[str] | None = None,
     output_format: str = "console",
     table_style: str = "lines",
     disable_numparse: bool = True,
@@ -213,7 +216,7 @@ def _create_rich_table(
     headers: list[str],
     config: dict[str, dict],
     column_names: list[str],
-    title: Optional[str] = None,
+    title: str | None = None,
     table_style: str = "lines",
 ) -> Table:
     if table_style == "zebra":
@@ -254,7 +257,7 @@ def _get_rich_justify(col_config: dict) -> str:
     )
 
 
-def _get_rich_style(col_config: dict) -> Optional[str]:
+def _get_rich_style(col_config: dict) -> str | None:
     formatter = col_config.get("formatter", "string")
     style_map = {
         "scientific": "yellow",

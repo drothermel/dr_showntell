@@ -1,4 +1,5 @@
-from typing import Optional
+from collections.abc import Callable
+from typing import Any, Literal
 
 import pandas as pd
 from rich.align import Align
@@ -7,11 +8,11 @@ from rich.console import Console, ConsoleOptions, Group, RenderResult
 from rich.panel import Panel
 from rich.rule import Rule
 
-from datadec.fancy_table import FancyTable, HeaderCell
+from dr_showntell.fancy_table import FancyTable, HeaderCell
 
 
 class TitlePanel:
-    def __init__(self, title: str):
+    def __init__(self, title: str) -> None:
         self.title = title
 
     def __rich_console__(
@@ -29,7 +30,7 @@ class TitlePanel:
 
 
 class SectionRule:
-    def __init__(self, title: str, style: str = "bold blue"):
+    def __init__(self, title: str, style: str = "bold blue") -> None:
         self.title = title.title()
         self.style = style
         if "blue" in style:
@@ -56,7 +57,7 @@ class SectionRule:
 
 
 class SectionTitlePanel:
-    def __init__(self, label_text: str, *content):
+    def __init__(self, label_text: str, *content: Any) -> None:
         self.label_text = label_text
         self.content = content
 
@@ -73,7 +74,7 @@ class SectionTitlePanel:
 
 
 class InfoBlock:
-    def __init__(self, text: str, style: Optional[str] = None):
+    def __init__(self, text: str, style: str | None = None) -> None:
         self.text = text
         self.style = style
 
@@ -86,16 +87,16 @@ class InfoBlock:
             yield self.text
 
 
-def create_hyperparameter_sweep_table(
+def create_hyperparameter_sweep_table(  # noqa: C901 PLR0912
     data: pd.DataFrame,
     fixed_section: dict,
     swept_section: dict,
-    optimization: str = "max",
-    best_performance: Optional[dict] = None,
+    optimization: Literal["max", "min"] = "max",
+    best_performance: dict | None = None,
     highlight_threshold: float = 0.02,
 ) -> tuple[FancyTable, InfoBlock]:
     table = FancyTable(show_header=True, header_style="bold magenta")
-    for col in data.columns:
+    for _col in data.columns:
         table.add_column()
     if best_performance and best_performance.get("enabled", True):
         table.add_column()
@@ -136,7 +137,7 @@ def create_hyperparameter_sweep_table(
     if best_performance and best_performance.get("enabled", True):
         col_names = best_performance.get("column_names", ["Param", "Value"])
         for name in col_names:
-            header_row_2.append(HeaderCell(name))
+            header_row_2.extend([HeaderCell(name)])
     table.add_header_row(*header_row_2)
     for _, row in data.iterrows():
         best_col = None
@@ -171,10 +172,7 @@ def create_hyperparameter_sweep_table(
             row_data.append(value)
         if best_performance and best_performance.get("enabled", True) and best_col:
             transform_fn = swept_section.get("display_transform")
-            if transform_fn:
-                best_param_display = transform_fn(best_col)
-            else:
-                best_param_display = best_col
+            best_param_display = transform_fn(best_col) if transform_fn else best_col
             row_data.append(f"[green]{best_param_display}[/green]")
             row_data.append(f"[green]{best_value}[/green]")
         elif best_performance and best_performance.get("enabled", True):
@@ -189,13 +187,67 @@ def create_hyperparameter_sweep_table(
     return table, info_block
 
 
+def dataframe_to_fancy_tables(
+    df: pd.DataFrame,
+    max_cols_per_table_split: int,
+    title: str | None = None,
+    list_columns_truncate_at: int = 3,
+) -> list[FancyTable]:
+    assert max_cols_per_table_split > 0, "max_cols_per_table_split must be positive"
+    assert not df.empty, "DataFrame cannot be empty"
+
+    tables = []
+    columns = list(df.columns)
+
+    for i in range(0, len(columns), max_cols_per_table_split):
+        chunk_columns = columns[i:i + max_cols_per_table_split]
+        chunk_df = df[chunk_columns]
+
+        chunk_title = title
+        if title and len(columns) > max_cols_per_table_split:
+            chunk_number = (i // max_cols_per_table_split) + 1
+            total_chunks = (len(columns) - 1) // max_cols_per_table_split + 1
+            chunk_title = f"{title} (Part {chunk_number}/{total_chunks})"
+
+        table = FancyTable(
+            title=chunk_title,
+            show_header=True,
+            header_style="bold blue"
+        )
+
+        for col in chunk_columns:
+            table.add_column(col, style="dim")
+
+        for _, row in chunk_df.iterrows():
+            table_row = []
+            for col in chunk_columns:
+                value = row[col]
+                if isinstance(value, list):
+                    if len(value) == 0:
+                        value_str = "[]"
+                    elif len(value) > list_columns_truncate_at:
+                        value_str = str(value[:list_columns_truncate_at]) + "..."
+                    else:
+                        value_str = str(value)
+                elif pd.isna(value):
+                    value_str = "N/A"
+                else:
+                    value_str = str(value)
+                table_row.append(value_str)
+            table.add_row(*table_row)
+
+        tables.append(table)
+
+    return tables
+
+
 def create_counts_table(
     crosstab_df: pd.DataFrame,
     row_section_title: str,
     col_section_title: str,
     present_row_name: str = "Present",
     present_col_name: str = "Present",
-    col_display_transform: Optional[callable] = None,
+    col_display_transform: Callable | None = None,
 ) -> FancyTable:
     data_columns = [col for col in crosstab_df.columns if col != present_col_name]
     table_data = []
@@ -217,7 +269,7 @@ def create_counts_table(
     table = FancyTable(
         show_header=True, header_style="bold magenta", row_styles=["", "dim"]
     )
-    for col in table_df.columns:
+    for _col in table_df.columns:
         table.add_column()
     header_row_1 = [
         table.create_spanned_header("", 1, ""),  # Empty for row label
@@ -229,7 +281,7 @@ def create_counts_table(
     for col in data_columns:
         if col_display_transform:
             display_name = col_display_transform(col)
-        elif isinstance(col, (int, float)):
+        elif isinstance(col, int | float):
             display_name = f"{float(col):.2e}"
         else:
             display_name = str(col)
