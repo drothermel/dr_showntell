@@ -39,12 +39,8 @@ METRIC_NAMES = [
     "acc_raw",
     "acc_per_token",
     "acc_per_char",
-    "acc_per_byte",
     "acc_uncond",
     "no_answer",
-    "sum_logits_corr",
-    "logits_per_token_corr",
-    "logits_per_char_corr",
     "correct_prob",
     "correct_prob_per_token",
     "correct_prob_per_char",
@@ -166,6 +162,25 @@ def rename_columns_for_plotting(cleaned_df: pd.DataFrame) -> pd.DataFrame:
     return renamed_df
 
 
+def has_ft_evaluations(runs_df: pd.DataFrame, run_id: str) -> bool:
+    run_row = runs_df[runs_df["run_id"] == run_id]
+    if run_row.empty or pd.isna(run_row.iloc[0]["summary"]):
+        return False
+
+    try:
+        summary = json.loads(run_row.iloc[0]["summary"])
+
+        oe_eval_keys = [
+            key for key in summary.keys()
+            if key.startswith("oe_eval_metrics/") and not key.endswith("task_config")
+        ]
+
+        return len(oe_eval_keys) > 0
+
+    except (json.JSONDecodeError, TypeError):
+        return False
+
+
 def extract_eval_metrics(
     runs_df: pd.DataFrame, plotting_df: pd.DataFrame
 ) -> pd.DataFrame:
@@ -187,9 +202,26 @@ def extract_eval_metrics(
                 if key.startswith("oe_eval_metrics/") and not key.endswith(
                     "task_config"
                 ):
-                    if isinstance(value, (int, float)) and not any(
+                    if isinstance(value, dict):
+                        # Handle nested structure: oe_eval_metrics/task -> {metric: value}
+                        task_name = key.replace("oe_eval_metrics/", "")
+                        for metric_name, metric_value in value.items():
+                            if isinstance(metric_value, (int, float)) and metric_name not in EXCLUDED_METRICS:
+                                clean_key = f"{task_name}_{metric_name}".replace(":", "_").replace("/", "_")
+
+                                for old_task, new_task in TASK_NAME_MAPPING.items():
+                                    if old_task in clean_key:
+                                        clean_key = clean_key.replace(old_task, new_task)
+
+                                for old_metric, new_metric in METRIC_NAME_MAPPING.items():
+                                    if old_metric in clean_key:
+                                        clean_key = clean_key.replace(old_metric, new_metric)
+
+                                all_eval_columns[clean_key] = None
+                    elif isinstance(value, (int, float)) and not any(
                         excluded in key for excluded in EXCLUDED_METRICS
                     ):
+                        # Handle flat structure: oe_eval_metrics/task/metric
                         clean_key = (
                             key.replace("oe_eval_metrics/", "")
                             .replace(":", "_")
@@ -227,21 +259,33 @@ def extract_eval_metrics(
             summary = json.loads(run_row.iloc[0]["summary"])
 
             for col_name in all_eval_columns:
-                original_key = "oe_eval_metrics/" + col_name.replace("_", "/")
-                original_key = original_key.replace("_rc_", ":rc::").replace(
-                    "_olmes_", "::olmes:"
-                )
+                found_value = None
 
-                if original_key in summary and isinstance(
-                    summary[original_key], (int, float)
-                ):
-                    all_eval_columns[col_name].append(summary[original_key])
-                else:
-                    found_value = None
-                    for key, value in summary.items():
-                        if key.startswith("oe_eval_metrics/") and not any(
+                # Search through all oe_eval_metrics keys
+                for key, value in summary.items():
+                    if key.startswith("oe_eval_metrics/") and not key.endswith("task_config"):
+                        if isinstance(value, dict):
+                            # Handle nested structure: oe_eval_metrics/task -> {metric: value}
+                            task_name = key.replace("oe_eval_metrics/", "")
+                            for metric_name, metric_value in value.items():
+                                if isinstance(metric_value, (int, float)) and metric_name not in EXCLUDED_METRICS:
+                                    clean_key = f"{task_name}_{metric_name}".replace(":", "_").replace("/", "_")
+
+                                    for old_task, new_task in TASK_NAME_MAPPING.items():
+                                        if old_task in clean_key:
+                                            clean_key = clean_key.replace(old_task, new_task)
+
+                                    for old_metric, new_metric in METRIC_NAME_MAPPING.items():
+                                        if old_metric in clean_key:
+                                            clean_key = clean_key.replace(old_metric, new_metric)
+
+                                    if clean_key == col_name:
+                                        found_value = metric_value
+                                        break
+                        elif isinstance(value, (int, float)) and not any(
                             excluded in key for excluded in EXCLUDED_METRICS
                         ):
+                            # Handle flat structure: oe_eval_metrics/task/metric
                             clean_summary_key = (
                                 key.replace("oe_eval_metrics/", "")
                                 .replace(":", "_")
@@ -260,12 +304,14 @@ def extract_eval_metrics(
                                         old_metric, new_metric
                                     )
 
-                            if clean_summary_key == col_name and isinstance(
-                                value, (int, float)
-                            ):
+                            if clean_summary_key == col_name:
                                 found_value = value
                                 break
-                    all_eval_columns[col_name].append(found_value)
+
+                    if found_value is not None:
+                        break
+
+                all_eval_columns[col_name].append(found_value)
 
         except (json.JSONDecodeError, TypeError):
             for col_name in all_eval_columns:
@@ -384,43 +430,25 @@ def add_pretraining_data(
 
     console.print("Adding pretraining data lists and checkpoint values...")
 
+    task_metric_columns = get_available_task_metric_columns(pretrain_df)
+
     all_list_columns = {}
     all_checkpoint_columns = {}
 
-    for idx, row in plotting_df.iterrows():
-        ckpt_params = row["ckpt_params"]
-        ckpt_data = row["ckpt_data"]
-        ckpt_steps = row["ckpt_steps"]
+    for col in task_metric_columns:
+        all_list_columns[f"pt_{col}_list"] = []
+        all_checkpoint_columns[f"pt_{col}"] = []
 
-        if pd.isna(ckpt_steps) or ckpt_steps == "main":
-            console.print(
-                f"[yellow]Skipping row {idx}: ckpt_steps is {ckpt_steps}[/yellow]"
-            )
-            continue
+    for ppl_type in PPL_TYPES:
+        all_list_columns[f"pt_{ppl_type}_list"] = []
+        all_checkpoint_columns[f"pt_{ppl_type}"] = []
 
-        try:
-            ckpt_steps_int = int(ckpt_steps)
-        except (ValueError, TypeError):
-            console.print(
-                f"[yellow]Skipping row {idx}: cannot convert ckpt_steps {ckpt_steps} to int[/yellow]"
-            )
-            continue
-
-        list_data = extract_pretraining_lists(pretrain_df, ckpt_params, ckpt_data)
-        checkpoint_data = extract_pretraining_checkpoint_values(
-            pretrain_df, ckpt_params, ckpt_data, ckpt_steps_int
-        )
-
-        for col_name in list_data.keys():
-            if col_name not in all_list_columns:
-                all_list_columns[col_name] = []
-
-        for col_name in checkpoint_data.keys():
-            if col_name not in all_checkpoint_columns:
-                all_checkpoint_columns[col_name] = []
+    for core_metric in CORE_METRICS:
+        all_list_columns[f"pt_{core_metric}_list"] = []
+        all_checkpoint_columns[f"pt_{core_metric}"] = []
 
     console.print(
-        f"Initializing {len(all_list_columns)} list columns and {len(all_checkpoint_columns)} checkpoint columns for {len(plotting_df)} rows"
+        f"Pre-initialized {len(all_list_columns)} list columns and {len(all_checkpoint_columns)} checkpoint columns for {len(plotting_df)} rows"
     )
 
     for col_name in all_list_columns:
@@ -448,10 +476,12 @@ def add_pretraining_data(
         )
 
         for col_name, values in list_data.items():
-            all_list_columns[col_name][idx] = values
+            if col_name in all_list_columns:
+                all_list_columns[col_name][idx] = values
 
         for col_name, value in checkpoint_data.items():
-            all_checkpoint_columns[col_name][idx] = value
+            if col_name in all_checkpoint_columns:
+                all_checkpoint_columns[col_name][idx] = value
 
     new_columns_data = {**all_list_columns, **all_checkpoint_columns}
 
