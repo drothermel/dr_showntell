@@ -8,12 +8,16 @@ from rich.console import Console
 
 from dr_showntell.datadec_utils import load_data, filter_by_run_id
 from dr_showntell.console_components import dataframe_to_fancy_tables
-from combine_pt_ft_utils import (
+from dr_showntell.combine_pt_ft_utils import (
     resolve_main_checkpoint_steps,
     clean_dataframe_for_plotting,
     rename_columns_for_plotting,
     extract_eval_metrics,
+    add_pretraining_data,
 )
+MAX_RUNS = 5
+MAX_TABLES = 40
+TABLE_COL_SPLIT = 15
 
 console = Console()
 
@@ -58,8 +62,8 @@ def extract_finished_runs_with_history(
 
     analysis_results = []
 
-    for i, run in enumerate(finished_runs[:5]):
-        console.print(f"  Processing run {i+1}/5: {run['run_id']}")
+    for i, run in enumerate(finished_runs[:MAX_RUNS]):
+        console.print(f"  Processing run {i+1}/{MAX_RUNS}: {run['run_id']}")
 
         run_data = dict(run)
         run_data['run_state'] = 'finished'
@@ -93,11 +97,11 @@ def display_sample_results(combined_df: pd.DataFrame) -> pd.DataFrame:
 
     tables = dataframe_to_fancy_tables(
         combined_df,
-        max_cols_per_table_split=10,
+        max_cols_per_table_split=TABLE_COL_SPLIT,
         title="Final Plotting DataFrame - First 5 Finished Runs"
     )
 
-    for table in tables:
+    for table in tables[:MAX_TABLES]:
         console.print(table)
 
     return combined_df
@@ -123,6 +127,9 @@ def combine_processed_with_pretrain_data() -> None:
 
     console.print(f"\n[bold blue]📊 Extracting evaluation metrics...[/bold blue]")
     plotting_df = extract_eval_metrics(runs_df, plotting_df)
+
+    console.print(f"\n[bold blue]🔗 Adding pretraining data...[/bold blue]")
+    plotting_df = add_pretraining_data(plotting_df, pretrain_df)
 
     display_sample_results(plotting_df)
 

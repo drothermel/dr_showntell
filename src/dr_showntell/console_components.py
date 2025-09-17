@@ -222,8 +222,13 @@ def dataframe_to_fancy_tables(
             table_row = []
             for col in chunk_columns:
                 value = row[col]
-                if isinstance(value, list) and len(value) > list_columns_truncate_at:
-                    value_str = str(value[:list_columns_truncate_at]) + "..."
+                if isinstance(value, list):
+                    if len(value) == 0:
+                        value_str = "[]"
+                    elif len(value) > list_columns_truncate_at:
+                        value_str = str(value[:list_columns_truncate_at]) + "..."
+                    else:
+                        value_str = str(value)
                 elif pd.isna(value):
                     value_str = "N/A"
                 else:
