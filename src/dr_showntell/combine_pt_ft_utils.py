@@ -495,3 +495,143 @@ def add_pretraining_data(
     )
 
     return plotting_df
+
+
+def add_plotting_helper_columns(plotting_df: pd.DataFrame) -> pd.DataFrame:
+    plotting_df = plotting_df.copy()
+
+    console.print("Adding plotting helper columns...")
+
+    # 1. Delta columns for acc_uncond (ft - pt)
+    delta_acc_uncond_cols = []
+    for task in OLMES_TASKS:
+        ft_col = f"ft_{task}_acc_uncond"
+        pt_col = f"pt_{task}_acc_uncond"
+        delta_col = f"delta_{task}_acc_uncond"
+
+        if ft_col in plotting_df.columns and pt_col in plotting_df.columns:
+            plotting_df[delta_col] = plotting_df[ft_col] - plotting_df[pt_col]
+            delta_acc_uncond_cols.append(delta_col)
+
+    # 2. Delta columns for correct_prob (ft - pt)
+    delta_correct_prob_cols = []
+    for task in OLMES_TASKS:
+        ft_col = f"ft_{task}_correct_prob"
+        pt_col = f"pt_{task}_correct_prob"
+        delta_col = f"delta_{task}_correct_prob"
+
+        if ft_col in plotting_df.columns and pt_col in plotting_df.columns:
+            plotting_df[delta_col] = plotting_df[ft_col] - plotting_df[pt_col]
+            delta_correct_prob_cols.append(delta_col)
+
+    # 3. Total tokens (pt + ft)
+    if "pt_tokens" in plotting_df.columns and "ft_tok" in plotting_df.columns:
+        plotting_df["pt_ft_toks"] = plotting_df["pt_tokens"] + plotting_df["ft_tok"]
+        console.print("Added pt_ft_toks column")
+
+    # 4. Matched group columns (only for matched runs)
+    if ("comparison_metric" in plotting_df.columns and
+        "comparison_model_size" in plotting_df.columns):
+
+        # Matched runs: group by comparison model (size + metric + fixed Dolma1.7)
+        plotting_df["matched_group_name"] = (
+            plotting_df["comparison_model_size"] + "_" +
+            plotting_df["comparison_metric"] + "_" +
+            "Dolma1.7"
+        )
+
+        # Determine sort metric based on comparison_metric
+        def get_sort_metric_for_matched_group(group_rows: pd.DataFrame) -> str:
+            comparison_metric = group_rows["comparison_metric"].iloc[0]
+            if pd.notna(comparison_metric):
+                if "c4" in str(comparison_metric).lower():
+                    return "pt_c4_en-valppl"
+                elif "pile" in str(comparison_metric).lower():
+                    return "pt_pile-valppl"
+            return "pt_pile-valppl"
+
+        # Create group data for each matched group
+        group_to_data = {}
+        group_counter = 1
+
+        for group_name in plotting_df["matched_group_name"].unique():
+            group_rows = plotting_df[plotting_df["matched_group_name"] == group_name]
+            sort_metric = get_sort_metric_for_matched_group(group_rows)
+
+            if sort_metric in plotting_df.columns:
+                group_median = group_rows[sort_metric].median()
+                group_mean = group_rows[sort_metric].mean()
+                group_to_data[group_name] = (group_median, group_mean, sort_metric, group_counter)
+                group_counter += 1
+            else:
+                console.print(f"[yellow]Warning: {sort_metric} not found for {group_name}[/yellow]")
+                group_to_data[group_name] = (float('inf'), float('inf'), sort_metric, group_counter)
+                group_counter += 1
+
+        # Sort groups by their median metric values and assign final group IDs
+        sorted_groups = sorted(group_to_data.items(), key=lambda x: x[1][0])
+        final_group_mapping = {}
+
+        for idx, (group_name, (median_val, mean_val, metric_name, _)) in enumerate(sorted_groups):
+            group_id = idx + 1
+            final_group_mapping[group_name] = {
+                'id': group_id,
+                'median': median_val,
+                'mean': mean_val,
+                'metric': metric_name
+            }
+
+        # Add all the matched group columns
+        plotting_df["matched_group_id"] = plotting_df["matched_group_name"].map(
+            lambda x: final_group_mapping[x]['id']
+        )
+        plotting_df["matched_group_med_metric"] = plotting_df["matched_group_name"].map(
+            lambda x: final_group_mapping[x]['median']
+        )
+        plotting_df["matched_group_avg_metric"] = plotting_df["matched_group_name"].map(
+            lambda x: final_group_mapping[x]['mean']
+        )
+
+        # Report which metrics were used
+        metrics_used = set(data['metric'] for data in final_group_mapping.values())
+        console.print(f"Created matched_group_id with {len(final_group_mapping)} groups, sorted by: {sorted(metrics_used)}")
+
+        # 5. Add group statistics delta columns for matched runs
+        all_delta_cols = delta_acc_uncond_cols + delta_correct_prob_cols
+        group_stats_cols = []
+
+        for delta_col in all_delta_cols:
+            # Group averages
+            group_avg_col = f"group_avg_{delta_col}"
+            group_averages = plotting_df.groupby("matched_group_name")[delta_col].mean()
+            plotting_df[group_avg_col] = plotting_df["matched_group_name"].map(group_averages)
+            group_stats_cols.append(group_avg_col)
+
+            # Group medians
+            group_med_col = f"group_med_{delta_col}"
+            group_medians = plotting_df.groupby("matched_group_name")[delta_col].median()
+            plotting_df[group_med_col] = plotting_df["matched_group_name"].map(group_medians)
+            group_stats_cols.append(group_med_col)
+
+            # Group standard deviations
+            group_std_col = f"group_std_{delta_col}"
+            group_stds = plotting_df.groupby("matched_group_name")[delta_col].std()
+            plotting_df[group_std_col] = plotting_df["matched_group_name"].map(group_stds)
+            group_stats_cols.append(group_std_col)
+
+            # Group median absolute deviations
+            group_mad_col = f"group_mad_{delta_col}"
+            def calculate_mad(group_data: pd.Series) -> float:
+                median = group_data.median()
+                return (group_data - median).abs().median()
+
+            group_mads = plotting_df.groupby("matched_group_name")[delta_col].apply(calculate_mad)
+            plotting_df[group_mad_col] = plotting_df["matched_group_name"].map(group_mads)
+            group_stats_cols.append(group_mad_col)
+
+        console.print(f"Added {len(group_stats_cols)} group statistics delta columns (avg, med, std, mad)")
+
+    console.print(f"Added {len(delta_acc_uncond_cols)} delta_acc_uncond columns")
+    console.print(f"Added {len(delta_correct_prob_cols)} delta_correct_prob columns")
+
+    return plotting_df

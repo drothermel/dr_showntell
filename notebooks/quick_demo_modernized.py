@@ -267,7 +267,8 @@ def display_comprehensive_run_example(processed_dataframes: dict[str, pd.DataFra
 
         if not pretrained_data.empty:
             console.print(f"[green]✓ Found {len(pretrained_data)} pretrained model records[/green]")
-            console.print(f"  • Metrics: {pretrained_data['metric'].nunique()}")
+            if 'metric' in pretrained_data.columns:
+                console.print(f"  • Metrics: {pretrained_data['metric'].nunique()}")
             console.print(f"  • Steps: {pretrained_data['step'].nunique()}")
             console.print(f"  • Step range: {pretrained_data['step'].min()}-{pretrained_data['step'].max()}")
         else:

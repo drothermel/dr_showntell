@@ -15,10 +15,11 @@ from dr_showntell.combine_pt_ft_utils import (
     extract_eval_metrics,
     add_pretraining_data,
     has_ft_evaluations,
+    add_plotting_helper_columns,
 )
-MAX_RUNS = 20
-MAX_TABLES = 5
-TABLE_COL_SPLIT = 15
+MAX_DISPLAY_ROWS = 5
+MAX_TABLES = 50
+TABLE_COL_SPLIT = 20
 
 console = Console()
 
@@ -66,8 +67,8 @@ def extract_finished_runs_with_history(
 
     analysis_results = []
 
-    for i, run in enumerate(finished_runs[:MAX_RUNS]):
-        console.print(f"  Processing run {i+1}/{MAX_RUNS}: {run['run_id']} ({run_type})")
+    for i, run in enumerate(finished_runs):
+        console.print(f"  Processing run {i+1}/{len(finished_runs)}: {run['run_id']} ({run_type})")
 
         run_data = dict(run)
         run_data['run_state'] = 'finished'
@@ -122,6 +123,9 @@ def process_single_run_type(
     console.print(f"\n[bold blue]🔗 Adding pretraining data...[/bold blue]")
     plotting_df = add_pretraining_data(plotting_df, pretrain_df)
 
+    console.print(f"\n[bold blue]📈 Adding plotting helper columns...[/bold blue]")
+    plotting_df = add_plotting_helper_columns(plotting_df)
+
     return plotting_df
 
 
@@ -143,10 +147,13 @@ def display_sample_results(combined_df: pd.DataFrame, run_type: str) -> pd.DataF
     console.print(f"DataFrame with shape: {combined_df.shape}")
 
     if not combined_df.empty:
+        display_df = combined_df.head(MAX_DISPLAY_ROWS)
+        console.print(f"[dim]Showing first {len(display_df)} of {len(combined_df)} rows[/dim]")
+
         tables = dataframe_to_fancy_tables(
-            combined_df,
+            display_df,
             max_cols_per_table_split=TABLE_COL_SPLIT,
-            title=f"Final Plotting DataFrame - {run_type.title()} Runs"
+            title=f"Final Plotting DataFrame - {run_type.title()} Runs (Sample)"
         )
 
         for table in tables[:MAX_TABLES]:
@@ -164,7 +171,8 @@ def combine_processed_with_pretrain_data(require_ft_evaluations: bool = True) ->
     processed_data, pretrain_df, runs_df, history_df = load_datasets()
     processed_runs = processed_data['processed_runs']
 
-    target_run_types = ['matched', 'simple_ft_vary_tokens', 'simple_ft']
+    #target_run_types = ['matched', 'simple_ft_vary_tokens', 'simple_ft']
+    target_run_types = ['matched']
 
     for run_type in target_run_types:
         plotting_df = process_single_run_type(run_type, processed_runs, pretrain_df, runs_df, history_df, require_ft_evaluations)

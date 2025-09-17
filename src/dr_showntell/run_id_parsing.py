@@ -396,7 +396,10 @@ def apply_processing(
         if "comparison_model_size" in processed_df.columns:
             processed_df["comparison_model_recipe"] = DEFAULT_COMPARISON_MODEL_RECIPE
 
-        if "comparison_metric" in processed_df.columns:
+        if run_type == "matched":
+            if "comparison_metric" not in processed_df.columns:
+                processed_df["comparison_metric"] = "pile"
+            processed_df["comparison_metric"] = processed_df["comparison_metric"].fillna("pile")
             processed_df["comparison_metric"] = processed_df["comparison_metric"].map(
                 lambda x: x + "_en-valppl" if x == "c4" else x + "-valppl"
             )
