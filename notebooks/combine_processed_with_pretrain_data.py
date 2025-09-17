@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pickle
 from pathlib import Path
 
@@ -7,9 +8,24 @@ import pandas as pd
 from rich.console import Console
 
 from dr_showntell.datadec_utils import load_data, filter_by_model_size, filter_by_recipe, filter_by_step, filter_by_run_id
-from dr_showntell.fancy_table import FancyTable
+from dr_showntell.console_components import dataframe_to_fancy_tables
 
 console = Console()
+
+TASK_NAME_MAPPING = {
+    "core_9mcqa_rc__olmes": "core9",
+}
+
+METRIC_NAME_MAPPING = {
+}
+
+EXCLUDED_METRICS = [
+    "no_answer",
+    "full_predicted_index_per_char_micro",
+    "full_predicted_index_per_char_macro",
+    "full_predicted_index_per_token_micro",
+    "full_predicted_index_per_token_macro",
+]
 
 
 def get_pretrained_data_counts(pretrain_df: pd.DataFrame, model_size: str | None, recipe: str | None, step: int | None = None) -> int:
@@ -70,29 +86,13 @@ def analyze_run_data_availability(
 
     analysis_results = []
 
-    for i, run in enumerate(finished_runs):
-        if i % 25 == 0:
-            console.print(f"  Processing run {i+1}/{len(finished_runs)}...")
-
-        run_id = run['run_id']
+    for i, run in enumerate(finished_runs[:5]):
+        console.print(f"  Processing run {i+1}/5: {run['run_id']}")
 
         run_data = dict(run)
         run_data['run_state'] = 'finished'
 
-        comparison_size = run.get('comparison_model_size')
-        comparison_recipe = run.get('comparison_model_recipe')
-        initial_size = run.get('initial_checkpoint_size')
-        initial_recipe = run.get('initial_checkpoint_recipe')
-        initial_steps = run.get('initial_checkpoint_steps')
-
-        initial_steps_int = None
-        if initial_steps and initial_steps != 'main':
-            try:
-                initial_steps_int = int(initial_steps)
-            except (ValueError, TypeError):
-                pass
-
-        history_data = filter_by_run_id(history_df, run_id)
+        history_data = filter_by_run_id(history_df, run['run_id'])
 
         if not history_data.empty:
             history_sorted = history_data.sort_values('step')
@@ -113,154 +113,141 @@ def analyze_run_data_availability(
     return analysis_results
 
 
-def display_analysis_results(analysis_results: list[dict]) -> None:
-    console.print(f"\n[bold blue]📊 Combined Data Analysis Results[/bold blue]")
+def clean_dataframe_for_plotting(combined_df: pd.DataFrame) -> pd.DataFrame:
+    columns_to_drop = ['pattern_name', 'abs_difference_ft_tokens', '_run_type', 'run_state', 'exp_name']
 
-    run_states = {}
-    for r in analysis_results:
-        state = r['run_state']
-        run_states[state] = run_states.get(state, 0) + 1
+    existing_columns_to_drop = [col for col in columns_to_drop if col in combined_df.columns]
+    cleaned_df = combined_df.drop(columns=existing_columns_to_drop)
 
-    summary_stats = {
-        'total_runs': len(analysis_results),
-        'with_history': sum(1 for r in analysis_results if r['num_history_rows'] > 0),
-        'with_comparison_pretrain': sum(1 for r in analysis_results if r['num_pretrain_comparison'] > 0),
-        'with_initial_pretrain': sum(1 for r in analysis_results if r['num_pretrain_initial'] > 0),
-        'with_both_pretrain': sum(1 for r in analysis_results if r['num_pretrain_comparison'] > 0 and r['num_pretrain_initial'] > 0),
-        'run_states': run_states
+    console.print(f"Dropped columns: {existing_columns_to_drop}")
+    console.print(f"Cleaned DataFrame shape: {cleaned_df.shape}")
+
+    return cleaned_df
+
+
+def rename_columns_for_plotting(cleaned_df: pd.DataFrame) -> pd.DataFrame:
+    column_renames = {
+        'initial_checkpoint_recipe': 'ckpt_data',
+        'initial_checkpoint_size': 'ckpt_params',
+        'initial_checkpoint_steps': 'ckpt_steps',
+        'num_finetune_tokens_per_epoch': 'ft_tok_per_epoch',
+        'num_finetune_epochs': 'ft_epochs',
+        'num_finetune_tokens': 'ft_tok',
+        'num_finetuned_tokens_real': 'ft_tok_real',
+        'steps_list': 'ft_steps_list',
+        'learning_rate_list': 'ft_lrs_list',
+        'total_tokens_list': 'ft_toks_list',
+        "train_loss_list": "ft_loss_list",
     }
 
-    console.print(f"[yellow]Summary Statistics:[/yellow]")
-    console.print(f"  • Total runs analyzed: [cyan]{summary_stats['total_runs']:,}[/cyan]")
-    console.print(f"  • Runs with history data: [green]{summary_stats['with_history']:,}[/green] ({summary_stats['with_history']/summary_stats['total_runs']*100:.1f}%)")
-    console.print(f"  • Runs with comparison pretraining data: [blue]{summary_stats['with_comparison_pretrain']:,}[/blue] ({summary_stats['with_comparison_pretrain']/summary_stats['total_runs']*100:.1f}%)")
-    console.print(f"  • Runs with initial checkpoint pretraining data: [magenta]{summary_stats['with_initial_pretrain']:,}[/magenta] ({summary_stats['with_initial_pretrain']/summary_stats['total_runs']*100:.1f}%)")
-    console.print(f"  • Runs with both pretraining datasets: [yellow]{summary_stats['with_both_pretrain']:,}[/yellow] ({summary_stats['with_both_pretrain']/summary_stats['total_runs']*100:.1f}%)")
+    existing_renames = {old: new for old, new in column_renames.items() if old in cleaned_df.columns}
+    renamed_df = cleaned_df.rename(columns=existing_renames)
 
-    console.print(f"\n[bold cyan]Run States Distribution:[/bold cyan]")
-    for state, count in sorted(summary_stats['run_states'].items(), key=lambda x: x[1], reverse=True):
-        console.print(f"  • {state}: [yellow]{count:,}[/yellow] ({count/summary_stats['total_runs']*100:.1f}%)")
+    console.print(f"Renamed columns: {existing_renames}")
+    console.print(f"Final DataFrame shape: {renamed_df.shape}")
 
-    display_complete_results_table(analysis_results)
-    display_run_type_breakdown(analysis_results)
+    return renamed_df
 
 
-def display_complete_results_table(analysis_results: list[dict]) -> None:
-    console.print(f"\n[bold green]📋 Complete Results Table (all {len(analysis_results)} runs):[/bold green]")
+def extract_eval_metrics(runs_df: pd.DataFrame, plotting_df: pd.DataFrame) -> pd.DataFrame:
+    console.print(f"Extracting evaluation metrics from runs_df...")
 
-    table = FancyTable(
-        title="Combined Run and Pretraining Data Analysis - All Runs",
-        show_header=True,
-        header_style="bold blue"
+    all_eval_columns = {}
+
+    for _, row in plotting_df.iterrows():
+        run_id = row['run_id']
+
+        run_row = runs_df[runs_df['run_id'] == run_id]
+        if run_row.empty or pd.isna(run_row.iloc[0]['summary']):
+            continue
+
+        try:
+            summary = json.loads(run_row.iloc[0]['summary'])
+
+            for key, value in summary.items():
+                if key.startswith('oe_eval_metrics/') and not key.endswith('task_config'):
+                    if isinstance(value, (int, float)) and not any(excluded in key for excluded in EXCLUDED_METRICS):
+                        clean_key = key.replace('oe_eval_metrics/', '').replace(':', '_').replace('/', '_')
+
+                        for old_task, new_task in TASK_NAME_MAPPING.items():
+                            if old_task in clean_key:
+                                clean_key = clean_key.replace(old_task, new_task)
+
+                        for old_metric, new_metric in METRIC_NAME_MAPPING.items():
+                            if old_metric in clean_key:
+                                clean_key = clean_key.replace(old_metric, new_metric)
+
+                        all_eval_columns[clean_key] = None
+
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    console.print(f"Found {len(all_eval_columns)} unique evaluation metrics")
+
+    for col_name in all_eval_columns.keys():
+        all_eval_columns[col_name] = []
+
+    for _, row in plotting_df.iterrows():
+        run_id = row['run_id']
+
+        run_row = runs_df[runs_df['run_id'] == run_id]
+        if run_row.empty or pd.isna(run_row.iloc[0]['summary']):
+            for col_name in all_eval_columns.keys():
+                all_eval_columns[col_name].append(None)
+            continue
+
+        try:
+            summary = json.loads(run_row.iloc[0]['summary'])
+
+            for col_name in all_eval_columns.keys():
+                original_key = 'oe_eval_metrics/' + col_name.replace('_', '/')
+                original_key = original_key.replace('_rc_', ':rc::').replace('_olmes_', '::olmes:')
+
+                if original_key in summary and isinstance(summary[original_key], (int, float)):
+                    all_eval_columns[col_name].append(summary[original_key])
+                else:
+                    found_value = None
+                    for key, value in summary.items():
+                        if key.startswith('oe_eval_metrics/') and not any(excluded in key for excluded in EXCLUDED_METRICS):
+                            clean_summary_key = key.replace('oe_eval_metrics/', '').replace(':', '_').replace('/', '_')
+
+                            for old_task, new_task in TASK_NAME_MAPPING.items():
+                                if old_task in clean_summary_key:
+                                    clean_summary_key = clean_summary_key.replace(old_task, new_task)
+
+                            for old_metric, new_metric in METRIC_NAME_MAPPING.items():
+                                if old_metric in clean_summary_key:
+                                    clean_summary_key = clean_summary_key.replace(old_metric, new_metric)
+
+                            if clean_summary_key == col_name and isinstance(value, (int, float)):
+                                found_value = value
+                                break
+                    all_eval_columns[col_name].append(found_value)
+
+        except (json.JSONDecodeError, TypeError):
+            for col_name in all_eval_columns.keys():
+                all_eval_columns[col_name].append(None)
+
+    eval_columns_df = pd.DataFrame({f'ft_{col_name}': values for col_name, values in all_eval_columns.items()})
+    plotting_df = pd.concat([plotting_df, eval_columns_df], axis=1)
+
+    return plotting_df
+
+
+def display_sample_results(combined_df: pd.DataFrame) -> pd.DataFrame:
+    console.print(f"\n[bold blue]📊 Final Plotting DataFrame (5 runs)[/bold blue]")
+    console.print(f"DataFrame with shape: {combined_df.shape}")
+
+    tables = dataframe_to_fancy_tables(
+        combined_df,
+        max_cols_per_table_split=10,
+        title="Final Plotting DataFrame - First 5 Finished Runs"
     )
 
-    table.add_column("Run Type", style="cyan")
-    table.add_column("Run State", style="bright_yellow")
-    table.add_column("Run ID", style="dim")
-    table.add_column("Comp Size", style="yellow")
-    table.add_column("Comp Recipe", style="green")
-    table.add_column("Init Size", style="yellow")
-    table.add_column("Init Recipe", style="green")
-    table.add_column("Init Steps", style="magenta")
-    table.add_column("Hist Rows", justify="right", style="blue")
-    table.add_column("Comp PT Rows", justify="right", style="magenta")
-    table.add_column("Init PT Rows", justify="right", style="red")
+    for table in tables:
+        console.print(table)
 
-    for result in analysis_results:
-        table.add_row(
-            result['run_type'],
-            result['run_state'],
-            result['run_id'],
-            result['comparison_model_size'],
-            result['comparison_recipe'],
-            result['initial_model_size'],
-            result['initial_recipe'],
-            result['initial_steps'],
-            f"{result['num_history_rows']:,}",
-            f"{result['num_pretrain_comparison']:,}" if result['num_pretrain_comparison'] > 0 else "0",
-            f"{result['num_pretrain_initial']:,}" if result['num_pretrain_initial'] > 0 else "0"
-        )
-
-    console.print(table)
-
-
-def display_run_type_breakdown(analysis_results: list[dict]) -> None:
-    console.print(f"\n[bold blue]📈 Run Type Breakdown:[/bold blue]")
-
-    type_analysis = {}
-    for result in analysis_results:
-        run_type = result['run_type']
-        if run_type not in type_analysis:
-            type_analysis[run_type] = {
-                'count': 0,
-                'with_history': 0,
-                'with_comparison': 0,
-                'with_initial': 0,
-                'avg_history_rows': 0,
-                'avg_comparison_rows': 0,
-                'avg_initial_rows': 0
-            }
-
-        stats = type_analysis[run_type]
-        stats['count'] += 1
-        if result['num_history_rows'] > 0:
-            stats['with_history'] += 1
-        if result['num_pretrain_comparison'] > 0:
-            stats['with_comparison'] += 1
-        if result['num_pretrain_initial'] > 0:
-            stats['with_initial'] += 1
-
-        stats['avg_history_rows'] += result['num_history_rows']
-        stats['avg_comparison_rows'] += result['num_pretrain_comparison']
-        stats['avg_initial_rows'] += result['num_pretrain_initial']
-
-    for run_type, stats in type_analysis.items():
-        if stats['count'] > 0:
-            stats['avg_history_rows'] /= stats['count']
-            stats['avg_comparison_rows'] /= stats['count']
-            stats['avg_initial_rows'] /= stats['count']
-
-    type_table = FancyTable(
-        title="Analysis by Run Type",
-        show_header=True,
-        header_style="bold green"
-    )
-
-    type_table.add_column("Run Type", style="cyan")
-    type_table.add_column("Count", justify="right", style="yellow")
-    type_table.add_column("w/ History", justify="right", style="blue")
-    type_table.add_column("w/ Comp PT", justify="right", style="magenta")
-    type_table.add_column("w/ Init PT", justify="right", style="red")
-    type_table.add_column("Avg Hist", justify="right", style="dim")
-    type_table.add_column("Avg Comp", justify="right", style="dim")
-    type_table.add_column("Avg Init", justify="right", style="dim")
-
-    for run_type in sorted(type_analysis.keys(), key=lambda x: type_analysis[x]['count'], reverse=True):
-        stats = type_analysis[run_type]
-
-        type_table.add_row(
-            run_type,
-            f"{stats['count']:,}",
-            f"{stats['with_history']:,}",
-            f"{stats['with_comparison']:,}",
-            f"{stats['with_initial']:,}",
-            f"{stats['avg_history_rows']:.1f}",
-            f"{stats['avg_comparison_rows']:.0f}",
-            f"{stats['avg_initial_rows']:.0f}"
-        )
-
-    console.print(type_table)
-
-
-def save_combined_analysis(analysis_results: list[dict], extraction_timestamp: str) -> None:
-    console.print(f"\n[bold blue]💾 Saving combined analysis results...[/bold blue]")
-
-    combined_df = pd.DataFrame(analysis_results)
-    output_file = f"data/combined_analysis_{extraction_timestamp}.parquet"
-    combined_df.to_parquet(output_file, index=False)
-
-    console.print(f"[green]✓ Saved combined analysis to: {output_file}[/green]")
-    console.print(f"[dim]Columns: {list(combined_df.columns)}[/dim]")
+    return combined_df
 
 
 def combine_processed_with_pretrain_data() -> None:
@@ -270,8 +257,20 @@ def combine_processed_with_pretrain_data() -> None:
     processed_runs = processed_data['processed_runs']
 
     analysis_results = analyze_run_data_availability(processed_runs, pretrain_df, runs_df, history_df)
-    display_analysis_results(analysis_results)
-    save_combined_analysis(analysis_results, processed_data['metadata']['extraction_timestamp'])
+
+    console.print(f"\n[bold blue]🧹 Cleaning DataFrame for plotting...[/bold blue]")
+    raw_df = pd.DataFrame(analysis_results)
+    cleaned_df = clean_dataframe_for_plotting(raw_df)
+
+    console.print(f"\n[bold blue]🏷️ Renaming columns for plotting...[/bold blue]")
+    plotting_df = rename_columns_for_plotting(cleaned_df)
+
+    console.print(f"\n[bold blue]📊 Extracting evaluation metrics...[/bold blue]")
+    plotting_df = extract_eval_metrics(runs_df, plotting_df)
+
+    display_sample_results(plotting_df)
+
+    console.print(f"\n[green]✓ Created final plotting DataFrame with {len(plotting_df)} rows and {len(plotting_df.columns)} columns[/green]")
 
 
 if __name__ == "__main__":

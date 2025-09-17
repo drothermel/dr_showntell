@@ -187,6 +187,55 @@ def create_hyperparameter_sweep_table(  # noqa: C901 PLR0912
     return table, info_block
 
 
+def dataframe_to_fancy_tables(
+    df: pd.DataFrame,
+    max_cols_per_table_split: int,
+    title: str | None = None,
+    list_columns_truncate_at: int = 3,
+) -> list[FancyTable]:
+    assert max_cols_per_table_split > 0, "max_cols_per_table_split must be positive"
+    assert not df.empty, "DataFrame cannot be empty"
+
+    tables = []
+    columns = list(df.columns)
+
+    for i in range(0, len(columns), max_cols_per_table_split):
+        chunk_columns = columns[i:i + max_cols_per_table_split]
+        chunk_df = df[chunk_columns]
+
+        chunk_title = title
+        if title and len(columns) > max_cols_per_table_split:
+            chunk_number = (i // max_cols_per_table_split) + 1
+            total_chunks = (len(columns) - 1) // max_cols_per_table_split + 1
+            chunk_title = f"{title} (Part {chunk_number}/{total_chunks})"
+
+        table = FancyTable(
+            title=chunk_title,
+            show_header=True,
+            header_style="bold blue"
+        )
+
+        for col in chunk_columns:
+            table.add_column(col, style="dim")
+
+        for _, row in chunk_df.iterrows():
+            table_row = []
+            for col in chunk_columns:
+                value = row[col]
+                if isinstance(value, list) and len(value) > list_columns_truncate_at:
+                    value_str = str(value[:list_columns_truncate_at]) + "..."
+                elif pd.isna(value):
+                    value_str = "N/A"
+                else:
+                    value_str = str(value)
+                table_row.append(value_str)
+            table.add_row(*table_row)
+
+        tables.append(table)
+
+    return tables
+
+
 def create_counts_table(
     crosstab_df: pd.DataFrame,
     row_section_title: str,
