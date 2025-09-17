@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import pandas as pd
 
-PRETRAINED_DF_PATH = "/Users/daniellerothermel/drotherm/repos/datadec/data/datadecide/mean_eval_melted.parquet"
-RUNS_DF_PATH = "/Users/daniellerothermel/drotherm/repos/dr_wandb/data/runs_metadata.parquet"
-HISTORY_DF_PATH = "/Users/daniellerothermel/drotherm/repos/dr_wandb/data/runs_history.parquet"
+PRETRAINED_DF_PATH = (
+    "/Users/daniellerothermel/drotherm/repos/datadec/data/datadecide/full_eval.parquet"
+)
+RUNS_DF_PATH = (
+    "/Users/daniellerothermel/drotherm/repos/dr_wandb/data/runs_metadata.parquet"
+)
+HISTORY_DF_PATH = (
+    "/Users/daniellerothermel/drotherm/repos/dr_wandb/data/runs_history.parquet"
+)
 
 
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
