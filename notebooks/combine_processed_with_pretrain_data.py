@@ -49,30 +49,41 @@ def load_datasets() -> tuple[dict, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 def analyze_run_data_availability(
     processed_runs: list[dict], pretrain_df: pd.DataFrame, runs_df: pd.DataFrame, history_df: pd.DataFrame
 ) -> list[dict]:
-    console.print(f"Processing {len(processed_runs):,} runs...")
+    target_run_types = {'matched', 'simple_ft_vary_tokens', 'simple_ft'}
+
+    filtered_runs = [
+        run for run in processed_runs
+        if run.get('_run_type') in target_run_types
+    ]
+    console.print(f"Filtered to {len(filtered_runs):,} runs of target types: {target_run_types}")
+
+    finished_runs = []
+    for run in filtered_runs:
+        run_id = run['run_id']
+        runs_row = filter_by_run_id(runs_df, run_id)
+        if not runs_row.empty:
+            run_state = runs_row.iloc[0].get('state', 'N/A')
+            if run_state == 'finished':
+                finished_runs.append(run)
+
+    console.print(f"Filtered to {len(finished_runs):,} finished runs")
+
     analysis_results = []
 
-    for i, run in enumerate(processed_runs):
-        if i % 50 == 0:
-            console.print(f"  Processing run {i+1}/{len(processed_runs)}...")
+    for i, run in enumerate(finished_runs):
+        if i % 25 == 0:
+            console.print(f"  Processing run {i+1}/{len(finished_runs)}...")
 
         run_id = run['run_id']
+
+        run_data = dict(run)
+        run_data['run_state'] = 'finished'
+
         comparison_size = run.get('comparison_model_size')
         comparison_recipe = run.get('comparison_model_recipe')
         initial_size = run.get('initial_checkpoint_size')
         initial_recipe = run.get('initial_checkpoint_recipe')
         initial_steps = run.get('initial_checkpoint_steps')
-
-        history_rows = len(filter_by_run_id(history_df, run_id))
-
-        runs_row = filter_by_run_id(runs_df, run_id)
-        run_state = "N/A"
-        if not runs_row.empty:
-            run_state = runs_row.iloc[0].get('state', 'N/A')
-
-        comparison_pretrain_rows = get_pretrained_data_counts(
-            pretrain_df, comparison_size, comparison_recipe
-        )
 
         initial_steps_int = None
         if initial_steps and initial_steps != 'main':
@@ -81,25 +92,24 @@ def analyze_run_data_availability(
             except (ValueError, TypeError):
                 pass
 
-        initial_pretrain_rows = get_pretrained_data_counts(
-            pretrain_df, initial_size, initial_recipe, initial_steps_int
-        )
+        history_data = filter_by_run_id(history_df, run_id)
 
-        analysis_results.append({
-            'run_id': run_id,
-            'run_type': run.get('_run_type', 'unknown'),
-            'run_state': run_state,
-            'comparison_model_size': comparison_size or 'N/A',
-            'comparison_recipe': comparison_recipe or 'N/A',
-            'initial_model_size': initial_size or 'N/A',
-            'initial_recipe': initial_recipe or 'N/A',
-            'initial_steps': initial_steps or 'N/A',
-            'num_history_rows': history_rows,
-            'num_pretrain_comparison': comparison_pretrain_rows,
-            'num_pretrain_initial': initial_pretrain_rows
-        })
+        if not history_data.empty:
+            history_sorted = history_data.sort_values('step')
 
-    console.print(f"[green]✓ Analysis complete for {len(analysis_results)} runs[/green]")
+            run_data['steps_list'] = history_sorted['step'].tolist()
+            run_data['learning_rate_list'] = history_sorted['learning_rate'].tolist()
+            run_data['total_tokens_list'] = history_sorted['total_tokens'].dropna().tolist()
+            run_data['train_loss_list'] = history_sorted['train_loss'].tolist()
+        else:
+            run_data['steps_list'] = []
+            run_data['learning_rate_list'] = []
+            run_data['total_tokens_list'] = []
+            run_data['train_loss_list'] = []
+
+        analysis_results.append(run_data)
+
+    console.print(f"[green]✓ Analysis complete for {len(analysis_results)} finished runs[/green]")
     return analysis_results
 
 
