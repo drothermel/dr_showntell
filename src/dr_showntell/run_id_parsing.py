@@ -5,12 +5,13 @@ from typing import Any
 
 import pandas as pd
 
+DEFAULT_COMPARISON_MODEL_RECIPE = "Dolma1.7"
 TIMESTAMP_6 = r"(?P<timestamp>\d{6}-\d{6})"
 TIMESTAMP_8 = r"(?P<timestamp>\d{4}_\d{2}_\d{2}-\d{2}_\d{2}_\d{2})"
 EXP_NAME = r"(?P<exp_name>[\w_]+)"
 COMPARISON_MODEL_SIZE = r"(?P<comparison_model_size>\d+[MB])"
-COMPARISON_MODEL_RECIPE = r"(?P<comparison_model_recipe>[\w_]+)"
-COMPARISON_MODEL_RECIPE_DASH = r"(?P<comparison_model_recipe>[\w-]+)"
+# COMPARISON_MODEL_RECIPE = r"(?P<comparison_model_recipe>[\w_]+)"
+COMPARISON_METRIC = r"(?P<comparison_metric>[\w_]+)"
 INITIAL_CHECKPOINT_RECIPE = r"(?P<initial_checkpoint_recipe>[\w_]+)"
 INITIAL_CHECKPOINT_RECIPE_DASH = r"(?P<initial_checkpoint_recipe>[\w-]+)"
 INITIAL_CHECKPOINT_SIZE = r"(?P<initial_checkpoint_size>\d+[MB])"
@@ -42,13 +43,12 @@ FINETUNE_FT = "_finetune_Ft"
 FINETUNE_TOKENS_6 = rf"_finetune_{FINETUNE_TOKENS_EPOCHS_6}"
 
 DD_BLOCK_STEPS_WORD = rf"DD-{INITIAL_CHECKPOINT_RECIPE}-{INITIAL_CHECKPOINT_SIZE}"
-DD_BLOCK_FULL = rf"DD-{INITIAL_CHECKPOINT_RECIPE}-{INITIAL_CHECKPOINT_SIZE}-{INITIAL_CHECKPOINT_STEPS}-{SEED}"
-DD_COMPARISON_6 = rf"DD-{COMPARISON_MODEL_RECIPE_DASH}-{COMPARISON_MODEL_SIZE}"
-DD_COMPARISON_8 = rf"DD-{COMPARISON_MODEL_RECIPE}-{COMPARISON_MODEL_SIZE}"
+DD_BLOCK_FULL = rf"DD-{INITIAL_CHECKPOINT_RECIPE}-{INITIAL_CHECKPOINT_SIZE}-{INITIAL_CHECKPOINT_STEPS}-{SEED}"  # noqa: E501
+DD_COMPARISON_6 = rf"DD-[\w-]+-{COMPARISON_MODEL_SIZE}"
 
 MATCHED_PREFIX_6 = rf"{TIMESTAMP_6_EXP_NAME}_{COMPARISON_MODEL_SIZE}"
-MATCHED_PREFIX_WITH_RECIPE = (
-    rf"{TIMESTAMP_6_EXP_NAME}_{COMPARISON_MODEL_SIZE}_{COMPARISON_MODEL_RECIPE}"
+MATCHED_PREFIX_WITH_METRIC = (
+    rf"{TIMESTAMP_6_EXP_NAME}_{COMPARISON_MODEL_SIZE}_{COMPARISON_METRIC}"
 )
 
 FT1_PATTERN = re.compile(
@@ -78,7 +78,7 @@ MATCHED6_PATTERN = re.compile(
 )
 
 MATCHED7_PATTERN = re.compile(
-    rf"^{TIMESTAMP_8_EXP_NAME}_{DD_COMPARISON_8}_Ft_{DD_BLOCK_FULL}{LR_SUFFIX}$"
+    rf"^{TIMESTAMP_8_EXP_NAME}_{DD_COMPARISON_6}_Ft_{DD_BLOCK_FULL}{LR_SUFFIX}$"
 )
 
 REDUCE_LOSS_PATTERN = re.compile(
@@ -94,11 +94,11 @@ DPO2_PATTERN = re.compile(
 )
 
 MATCHED1_PATTERN = re.compile(
-    rf"^{MATCHED_PREFIX_WITH_RECIPE}{FINETUNE_TOKENS_6}_{DD_BLOCK_FULL}$"
+    rf"^{MATCHED_PREFIX_WITH_METRIC}{FINETUNE_TOKENS_6}_{DD_BLOCK_FULL}$"
 )
 
 MATCHED2_PATTERN = re.compile(
-    rf"^{MATCHED_PREFIX_WITH_RECIPE}{FINETUNE_FT}_{DD_BLOCK_FULL}$"
+    rf"^{MATCHED_PREFIX_WITH_METRIC}{FINETUNE_FT}_{DD_BLOCK_FULL}$"
 )
 
 MATCHED3_PATTERN = re.compile(
@@ -125,9 +125,9 @@ FINETUNE_PATTERN = r"(\d+M)tx(\d+)"
 DD_PATTERN = r"DD-([^-]+)-(\d+M)-(\d+)-(\d+)"
 
 DEFAULTS = {
-    "comparison_model_recipe": "Dolma1.7",
     "num_finetune_epochs": "1",
     "initial_checkpoint_steps": "main",
+    "comparison_metric": "pile",
 }
 
 RECIPE_MAPPING = {
@@ -175,18 +175,32 @@ RECIPE_MAPPING = {
 }
 
 
+def convert_timestamp(ts_str: str) -> pd.Timestamp | None:
+    if pd.isna(ts_str):
+        return None
+    ts_str = str(ts_str)
+    if "_" in ts_str:
+        try:
+            return pd.to_datetime(ts_str, format="%Y_%m_%d-%H_%M_%S")
+        except (ValueError, TypeError):
+            return None
+    else:
+        try:
+            return pd.to_datetime(ts_str, format="%y%m%d-%H%M%S")
+        except (ValueError, TypeError):
+            return None
+
+
 def convert_string_to_number(value_str: str) -> float | None:
     if pd.isna(value_str):
         return None
     value_str = str(value_str).strip().upper()
-    if value_str == "N/A" or value_str == "":
+    if value_str in {"N/A", ""}:
         return None
     try:
         if value_str.endswith("M"):
             return float(value_str[:-1]) * 1_000_000
-        elif value_str.endswith("G"):
-            return float(value_str[:-1]) * 1_000_000_000
-        elif value_str.endswith("B"):
+        elif value_str.endswith(("G", "B")):
             return float(value_str[:-1]) * 1_000_000_000
         elif value_str.endswith("T"):
             return float(value_str[:-2]) * 1_000_000_000_000
@@ -310,7 +324,9 @@ def extract_config_fields(
                 if "total_tokens" in summary and summary["total_tokens"] is not None:
                     if run_id not in config_data:
                         config_data[run_id] = {}
-                    config_data[run_id]["num_finetuned_tokens_real"] = summary["total_tokens"]
+                    config_data[run_id]["num_finetuned_tokens_real"] = summary[
+                        "total_tokens"
+                    ]
             except (json.JSONDecodeError, ValueError, KeyError):
                 pass
 
@@ -373,59 +389,73 @@ def apply_processing(
                                 processed_df.loc[run_idx[0], field] = str(value)
 
         if "timestamp" in processed_df.columns:
-            def convert_timestamp(ts_str: str) -> pd.Timestamp | None:
-                if pd.isna(ts_str):
-                    return None
-                ts_str = str(ts_str)
-                if "_" in ts_str:
-                    try:
-                        return pd.to_datetime(ts_str, format="%Y_%m_%d-%H_%M_%S")
-                    except (ValueError, TypeError):
-                        return None
-                else:
-                    try:
-                        return pd.to_datetime(ts_str, format="%y%m%d-%H%M%S")
-                    except (ValueError, TypeError):
-                        return None
+            processed_df["timestamp"] = processed_df["timestamp"].apply(
+                convert_timestamp
+            )
 
-            processed_df["timestamp"] = processed_df["timestamp"].apply(convert_timestamp)
+        if "comparison_model_size" in processed_df.columns:
+            processed_df["comparison_model_recipe"] = DEFAULT_COMPARISON_MODEL_RECIPE
+
+        if "comparison_metric" in processed_df.columns:
+            processed_df["comparison_metric"] = processed_df["comparison_metric"].map(
+                lambda x: x + "_en-valppl" if x == "c4" else x + "-valppl"
+            )
 
         if "num_finetune_tokens" in processed_df.columns:
-            processed_df["num_finetune_tokens"] = processed_df["num_finetune_tokens"].apply(convert_string_to_number)
+            processed_df["num_finetune_tokens"] = processed_df[
+                "num_finetune_tokens"
+            ].apply(convert_string_to_number)
 
         if "num_finetune_tokens_per_epoch" in processed_df.columns:
-            processed_df["num_finetune_tokens_per_epoch"] = processed_df["num_finetune_tokens_per_epoch"].apply(convert_string_to_number)
+            processed_df["num_finetune_tokens_per_epoch"] = processed_df[
+                "num_finetune_tokens_per_epoch"
+            ].apply(convert_string_to_number)
 
         if "num_finetuned_tokens_real" in processed_df.columns:
-            processed_df["num_finetuned_tokens_real"] = processed_df["num_finetuned_tokens_real"].apply(convert_string_to_number)
+            processed_df["num_finetuned_tokens_real"] = processed_df[
+                "num_finetuned_tokens_real"
+            ].apply(convert_string_to_number)
 
-        if ("num_finetune_tokens_per_epoch" in processed_df.columns and
-            "num_finetune_epochs" in processed_df.columns):
+        if (
+            "num_finetune_tokens_per_epoch" in processed_df.columns
+            and "num_finetune_epochs" in processed_df.columns
+        ):
             if "num_finetune_tokens" not in processed_df.columns:
                 processed_df["num_finetune_tokens"] = None
 
-            processed_df["num_finetune_epochs"] = pd.to_numeric(processed_df["num_finetune_epochs"], errors="coerce")
-
-            mask = (processed_df["num_finetune_tokens_per_epoch"].notna() &
-                   processed_df["num_finetune_epochs"].notna() &
-                   processed_df["num_finetune_tokens"].isna())
-
-            processed_df.loc[mask, "num_finetune_tokens"] = (
-                processed_df.loc[mask, "num_finetune_tokens_per_epoch"] *
-                processed_df.loc[mask, "num_finetune_epochs"]
+            processed_df["num_finetune_epochs"] = pd.to_numeric(
+                processed_df["num_finetune_epochs"], errors="coerce"
             )
 
-        if ("num_finetune_tokens" in processed_df.columns and
-            "num_finetuned_tokens_real" in processed_df.columns):
-            mask = (processed_df["num_finetune_tokens"].notna() &
-                   processed_df["num_finetuned_tokens_real"].notna() &
-                   (processed_df["num_finetune_tokens"] != 0))
+            mask = (
+                processed_df["num_finetune_tokens_per_epoch"].notna()
+                & processed_df["num_finetune_epochs"].notna()
+                & processed_df["num_finetune_tokens"].isna()
+            )
+
+            processed_df.loc[mask, "num_finetune_tokens"] = (
+                processed_df.loc[mask, "num_finetune_tokens_per_epoch"]
+                * processed_df.loc[mask, "num_finetune_epochs"]
+            )
+
+        if (
+            "num_finetune_tokens" in processed_df.columns
+            and "num_finetuned_tokens_real" in processed_df.columns
+        ):
+            mask = (
+                processed_df["num_finetune_tokens"].notna()
+                & processed_df["num_finetuned_tokens_real"].notna()
+                & (processed_df["num_finetune_tokens"] != 0)
+            )
 
             processed_df["abs_difference_ft_tokens_pct"] = None
             processed_df.loc[mask, "abs_difference_ft_tokens_pct"] = (
-                abs(processed_df.loc[mask, "num_finetune_tokens"] -
-                    processed_df.loc[mask, "num_finetuned_tokens_real"]) /
-                processed_df.loc[mask, "num_finetune_tokens"] * 100
+                abs(
+                    processed_df.loc[mask, "num_finetune_tokens"]
+                    - processed_df.loc[mask, "num_finetuned_tokens_real"]
+                )
+                / processed_df.loc[mask, "num_finetune_tokens"]
+                * 100
             )
 
         processed[run_type] = processed_df
