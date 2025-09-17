@@ -1,197 +1,120 @@
+#!/usr/bin/env python3
+
 from __future__ import annotations
 
 import pickle
 from pathlib import Path
+from typing import Any
 
+import click
 import pandas as pd
 from rich.console import Console
 
-from dr_showntell.fancy_table import FancyTable
-from dr_showntell.datadec_utils import load_data
-from dr_showntell.run_id_parsing import parse_and_group_run_ids, convert_groups_to_dataframes, apply_processing
+from dr_showntell.console_components import dataframe_to_fancy_tables
 
 console = Console()
 
+MAX_COLS = 20
 
-def load_runs_and_matched_data() -> tuple[pd.DataFrame, list[dict], str]:
-    pretrain_df, runs_df, history_df = load_data()
+def load_combined_data() -> pd.DataFrame:
+    data_path = Path("data/combined_plotting_data_matched.pkl")
+    assert data_path.exists(), f"Data file not found: {data_path}"
 
-    pickle_files = sorted(Path('data').glob('*_matched_run_data.pkl'))
-    assert pickle_files, "No matched run data pickle files found in data/ directory"
+    console.print(f"Loading combined data from: [cyan]{data_path}[/cyan]")
+    with open(data_path, 'rb') as f:
+        df = pickle.load(f)
 
-    latest_file = pickle_files[-1]
-    console.print(f"Loading most recent pickle: [cyan]{latest_file}[/cyan]")
-
-    with open(latest_file, 'rb') as f:
-        matched_data = pickle.load(f)
-
-    return runs_df, matched_data, str(latest_file)
+    console.print(f"Loaded DataFrame: {df.shape[0]} rows, {df.shape[1]} columns")
+    return df
 
 
-def safe_truncate(value: str | None, max_len: int) -> str:
-    if value is None:
-        return "N/A"
-    return value[:max_len] + "..." if len(value) > max_len else value
+def display_group_summary(df: pd.DataFrame) -> None:
+    console.print("\n[bold blue]📊 Matched Group Summary[/bold blue]")
 
+    group_summary = df[['matched_group_name', 'matched_group_id', 'matched_group_med_metric']].drop_duplicates()
+    group_summary = group_summary.sort_values('matched_group_id')
 
-def analyze_run_types(runs_df: pd.DataFrame, history_df: pd.DataFrame) -> None:
-    console.print(f"\n[bold blue]Run ID Type Classification Analysis[/bold blue]")
+    console.print(f"Found {len(group_summary)} unique matched groups")
 
-    grouped_data = parse_and_group_run_ids(runs_df)
-    type_dataframes = convert_groups_to_dataframes(grouped_data)
-    processed_dataframes = apply_processing(type_dataframes, runs_df=runs_df, history_df=history_df)
-
-    all_run_ids = runs_df['run_id'].tolist()
-    console.print(f"Total runs analyzed: [cyan]{len(all_run_ids):,}[/cyan]")
-    console.print(f"Run types found: [yellow]{len(grouped_data)}[/yellow]")
-
-    type_colors = {
-        'matched': 'green',
-        'simple_ft_vary_tokens': 'magenta',
-        'simple_ft': 'blue',
-        'dpo': 'bright_red',
-        'old': 'bright_white',
-        'reduce_type': 'white',
-        'other': 'dim'
-    }
-
-    type_counts = {}
-    for run_type, data_list in grouped_data.items():
-        if run_type == "old":
-            from dr_showntell.run_id_parsing import classify_run_id_type_and_extract
-            old_count = sum(1 for run_id in all_run_ids
-                          if classify_run_id_type_and_extract(run_id)[0] == "old")
-            type_counts[run_type] = old_count
-        else:
-            type_counts[run_type] = len(data_list)
-
-    table = FancyTable(
-        title="Run ID Type Summary",
-        show_header=True,
-        header_style="bold blue"
+    tables = dataframe_to_fancy_tables(
+        group_summary,
+        max_cols_per_table_split=MAX_COLS,
+        title="Matched Groups Overview"
     )
 
-    table.add_column("Run Type", style="bold")
-    table.add_column("Count", justify="right", style="cyan")
-    table.add_column("Example Run ID", style="dim")
-
-    for run_type in sorted(type_counts.keys(), key=lambda x: type_counts[x], reverse=True):
-        count = type_counts[run_type]
-        color = type_colors.get(run_type, 'white')
-
-        if run_type == "old":
-            from dr_showntell.run_id_parsing import classify_run_id_type_and_extract
-            example_run_id = next(run_id for run_id in all_run_ids
-                                if classify_run_id_type_and_extract(run_id)[0] == "old")
-        elif run_type in grouped_data and grouped_data[run_type]:
-            example_run_id = grouped_data[run_type][0]['run_id']
-        else:
-            example_run_id = "N/A"
-
-        table.add_row(
-            f"[{color}]{run_type}[/{color}]",
-            f"{count:,}",
-            example_run_id
-        )
-
-    console.print(table)
-
-    if "other" in grouped_data:
-        other_run_ids = [item['run_id'] for item in grouped_data["other"]]
-        color = type_colors.get("other", 'dim')
-
-        console.print(f"\n[bold {color}]OTHER Run IDs ({len(other_run_ids)} total):[/bold {color}]")
-
-        detail_table = FancyTable(
-            title=f"OTHER Run IDs",
-            show_header=True,
-            header_style=f"bold {color}"
-        )
-
-        detail_table.add_column("Run ID", style=color)
-
-        for run_id in sorted(other_run_ids):
-            detail_table.add_row(run_id)
-
-        console.print(detail_table)
-
-    for run_type in sorted(processed_dataframes.keys(), key=lambda x: len(processed_dataframes[x]), reverse=True):
-        df = processed_dataframes[run_type]
-        color = type_colors.get(run_type, 'white')
-
-        console.print(f"\n[bold {color}]{run_type.upper()} Detailed Analysis ({len(df)} runs):[/bold {color}]")
-
-        detail_table = FancyTable(
-            title=f"{run_type.upper()} - Extracted Components",
-            show_header=True,
-            header_style=f"bold {color}"
-        )
-
-        for col in df.columns:
-            detail_table.add_column(col, style="dim" if col == "run_id" else "")
-
-        for _, row in df.iterrows():
-            detail_table.add_row(*[str(row[col]) if pd.notna(row[col]) else "N/A" for col in df.columns])
-        console.print(detail_table)
-
-def analyze_run_matching(runs_df: pd.DataFrame, matched_data: list[dict], pickle_filepath: str) -> None:
-    console.print(f"\n[bold blue]Run Matching Analysis[/bold blue]")
-
-    all_run_ids = set(runs_df['run_id'].tolist())
-    matched_run_ids = {entry['run_id'] for entry in matched_data}
-    unmatched_run_ids = all_run_ids - matched_run_ids
-
-    console.print(f"Data source: [dim]{pickle_filepath}[/dim]")
-    console.print(f"Total runs in dataset: [cyan]{len(all_run_ids):,}[/cyan]")
-    console.print(f"Matched runs (with history): [green]{len(matched_run_ids):,}[/green]")
-    console.print(f"Unmatched runs: [red]{len(unmatched_run_ids):,}[/red]")
-    console.print(f"Match rate: [yellow]{len(matched_run_ids)/len(all_run_ids)*100:.1f}%[/yellow]")
-
-    if unmatched_run_ids:
-        console.print(f"\n[bold red]Unmatched Run IDs:[/bold red]")
-
-        unmatched_list = sorted(list(unmatched_run_ids))
-
-        table = FancyTable(
-            title=f"Unmatched Run IDs ({len(unmatched_list)} total)",
-            show_header=True,
-            header_style="bold red"
-        )
-
-        table.add_column("Run ID", style="cyan")
-
-        for i, run_id in enumerate(unmatched_list):
-            row_style = "dim" if i % 2 == 1 else ""
-            table.add_row(run_id, style=row_style)
-
+    for table in tables:
         console.print(table)
-    else:
-        console.print(f"\n[green]All run IDs were successfully matched![/green]")
 
-    if matched_run_ids:
-        console.print(f"\n[bold green]Matched Run IDs:[/bold green]")
+def display_token_distribution_by_group(df: pd.DataFrame) -> None:
+    console.print("\n[bold blue]📊 Fine-tuning Token Distribution by Group[/bold blue]")
 
-        matched_list = sorted(list(matched_run_ids))
+    df_clean = df.dropna(subset=['ft_tok_real', 'matched_group_name'])
+    df_clean = df_clean.copy()
+    df_clean['ft_tokens_rounded'] = (df_clean['ft_tok_real'] / 10_000_000).round() * 10
 
-        matched_table = FancyTable(
-            title=f"Matched Run IDs ({len(matched_list)} total)",
-            show_header=True,
-            header_style="bold green"
-        )
+    token_pivot = df_clean.groupby(['matched_group_name', 'ft_tokens_rounded']).size().unstack(fill_value=0)
+    token_pivot = token_pivot.loc[df_clean.groupby('matched_group_name')['matched_group_id'].first().sort_values().index]
 
-        matched_table.add_column("Run ID", style="green")
+    token_pivot.columns = [f"{int(col)}M" for col in token_pivot.columns]
 
-        for i, run_id in enumerate(matched_list):
-            row_style = "dim" if i % 2 == 1 else ""
-            matched_table.add_row(run_id, style=row_style)
+    tables = dataframe_to_fancy_tables(
+        token_pivot.reset_index(),
+        max_cols_per_table_split=MAX_COLS,
+        title="Fine-tuning Token Counts by Group (rounded to nearest 10M)"
+    )
 
-        console.print(matched_table)
+    for table in tables:
+        console.print(table)
 
+def display_checkpoint_distribution_by_group(df: pd.DataFrame) -> None:
+    console.print("\n[bold blue]📊 Checkpoint Parameter Distribution by Group[/bold blue]")
 
-def main() -> None:
-    runs_df, matched_data, pickle_filepath = load_runs_and_matched_data()
-    pretrain_df, runs_df_full, history_df = load_data()
-    analyze_run_types(runs_df, history_df)
+    df_clean = df.dropna(subset=['ckpt_params', 'matched_group_name'])
+
+    params_pivot = df_clean.groupby(['matched_group_name', 'ckpt_params']).size().unstack(fill_value=0)
+    params_pivot = params_pivot.loc[df_clean.groupby('matched_group_name')['matched_group_id'].first().sort_values().index]
+
+    tables = dataframe_to_fancy_tables(
+        params_pivot.reset_index(),
+        max_cols_per_table_split=MAX_COLS,
+        title="Checkpoint Parameter Counts by Group"
+    )
+
+    for table in tables:
+        console.print(table)
+
+def display_recipe_distribution_by_group(df: pd.DataFrame) -> None:
+    console.print("\n[bold blue]📊 Checkpoint Recipe Distribution by Group[/bold blue]")
+
+    df_clean = df.dropna(subset=['ckpt_data', 'matched_group_name'])
+
+    recipe_pivot = df_clean.groupby(['matched_group_name', 'ckpt_data']).size().unstack(fill_value=0)
+    recipe_pivot = recipe_pivot.loc[df_clean.groupby('matched_group_name')['matched_group_id'].first().sort_values().index]
+
+    tables = dataframe_to_fancy_tables(
+        recipe_pivot.reset_index(),
+        max_cols_per_table_split=MAX_COLS,
+        title="Checkpoint Recipe Counts by Group"
+    )
+
+    for table in tables:
+        console.print(table)
+
+@click.command()
+@click.option("--pause", type=int, default=0, help="Pause duration in seconds")
+def main(pause: int, **kwargs: Any) -> None:
+    console.print("[bold blue]🔬 Combined Data Presentation Tool[/bold blue]")
+
+    df = load_combined_data()
+    display_group_summary(df)
+    display_token_distribution_by_group(df)
+    display_checkpoint_distribution_by_group(df)
+    display_recipe_distribution_by_group(df)
+
+    if pause > 0:
+        console.print(f"\n[dim]Pausing for {pause} seconds...[/dim]")
+        import time
+        time.sleep(pause)
 
 
 if __name__ == "__main__":

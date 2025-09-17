@@ -601,31 +601,43 @@ def add_plotting_helper_columns(plotting_df: pd.DataFrame) -> pd.DataFrame:
         group_stats_cols = []
 
         for delta_col in all_delta_cols:
+            if delta_col not in plotting_df.columns:
+                continue
+
             # Group averages
             group_avg_col = f"group_avg_{delta_col}"
-            group_averages = plotting_df.groupby("matched_group_name")[delta_col].mean()
+            group_averages = plotting_df.groupby("matched_group_name")[delta_col].apply(
+                lambda x: x.mean() if len(x.dropna()) > 0 else None
+            )
             plotting_df[group_avg_col] = plotting_df["matched_group_name"].map(group_averages)
             group_stats_cols.append(group_avg_col)
 
             # Group medians
             group_med_col = f"group_med_{delta_col}"
-            group_medians = plotting_df.groupby("matched_group_name")[delta_col].median()
+            group_medians = plotting_df.groupby("matched_group_name")[delta_col].apply(
+                lambda x: x.median() if len(x.dropna()) > 0 else None
+            )
             plotting_df[group_med_col] = plotting_df["matched_group_name"].map(group_medians)
             group_stats_cols.append(group_med_col)
 
             # Group standard deviations
             group_std_col = f"group_std_{delta_col}"
-            group_stds = plotting_df.groupby("matched_group_name")[delta_col].std()
+            group_stds = plotting_df.groupby("matched_group_name")[delta_col].apply(
+                lambda x: x.std() if len(x.dropna()) > 1 else None
+            )
             plotting_df[group_std_col] = plotting_df["matched_group_name"].map(group_stds)
             group_stats_cols.append(group_std_col)
 
             # Group median absolute deviations
             group_mad_col = f"group_mad_{delta_col}"
-            def calculate_mad(group_data: pd.Series) -> float:
-                median = group_data.median()
-                return (group_data - median).abs().median()
+            def calculate_mad_safe(group_data: pd.Series) -> float | None:
+                clean_data = group_data.dropna()
+                if len(clean_data) == 0:
+                    return None
+                median = clean_data.median()
+                return (clean_data - median).abs().median()
 
-            group_mads = plotting_df.groupby("matched_group_name")[delta_col].apply(calculate_mad)
+            group_mads = plotting_df.groupby("matched_group_name")[delta_col].apply(calculate_mad_safe)
             plotting_df[group_mad_col] = plotting_df["matched_group_name"].map(group_mads)
             group_stats_cols.append(group_mad_col)
 
