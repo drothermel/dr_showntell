@@ -74,14 +74,35 @@ def extract_finished_runs_with_history(
         run_data['run_state'] = 'finished'
 
         history_data = filter_by_run_id(history_df, run['run_id'])
-
         if not history_data.empty:
             history_sorted = history_data.sort_values('step')
 
+
+
+
+            # Fix the token count issue
+            history_tok_list = history_sorted['total_tokens'].tolist()
+            prev_curr = zip(history_tok_list[:-1], history_tok_list[1:])
+            output_vals = [history_tok_list[0]]
+            base_val = 0
+            for prev, curr in prev_curr:
+                if curr < prev:
+                    base_val = prev
+                output_vals.append(curr + base_val)
+            if base_val > 0:
+                tstrs = []
+                for start, end in zip(history_tok_list, output_vals):
+                    tstrs.append(f"{start/1_000_000:.1f}M = {end/1_000_000:.1f}M")
+                history_tok_list = output_vals
+                run_data['num_finetuned_tokens_real'] = output_vals[-1]
+
+
             run_data['steps_list'] = history_sorted['step'].tolist()
             run_data['learning_rate_list'] = history_sorted['learning_rate'].tolist()
-            run_data['total_tokens_list'] = history_sorted['total_tokens'].dropna().tolist()
+            run_data['total_tokens_list'] = history_tok_list
             run_data['train_loss_list'] = history_sorted['train_loss'].tolist()
+
+
         else:
             run_data['steps_list'] = []
             run_data['learning_rate_list'] = []

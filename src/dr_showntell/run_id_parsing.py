@@ -5,6 +5,9 @@ from typing import Any
 
 import pandas as pd
 
+ALL_FT_TOKENS = 665127434
+DEFAULT_FULL_FT_EPOCHS = 2
+
 DEFAULT_COMPARISON_MODEL_RECIPE = "Dolma1.7"
 TIMESTAMP_6 = r"(?P<timestamp>\d{6}-\d{6})"
 TIMESTAMP_8 = r"(?P<timestamp>\d{4}_\d{2}_\d{2}-\d{2}_\d{2}_\d{2})"
@@ -399,7 +402,9 @@ def apply_processing(
         if run_type == "matched":
             if "comparison_metric" not in processed_df.columns:
                 processed_df["comparison_metric"] = "pile"
-            processed_df["comparison_metric"] = processed_df["comparison_metric"].fillna("pile")
+            processed_df["comparison_metric"] = processed_df[
+                "comparison_metric"
+            ].fillna("pile")
             processed_df["comparison_metric"] = processed_df["comparison_metric"].map(
                 lambda x: x + "_en-valppl" if x == "c4" else x + "-valppl"
             )
@@ -418,6 +423,18 @@ def apply_processing(
             processed_df["num_finetuned_tokens_real"] = processed_df[
                 "num_finetuned_tokens_real"
             ].apply(convert_string_to_number)
+
+        # Fix parsing issue where "Ft" actually means
+        # 2 epochs of full dataset -> 665Mtx2
+        mask = processed_df["run_id"].str.contains("_Ft_")
+        processed_df.loc[mask, "num_finetune_tokens_per_epoch"] = ALL_FT_TOKENS
+        processed_df.loc[mask, "num_finetune_epochs"] = DEFAULT_FULL_FT_EPOCHS
+        processed_df.loc[mask, "num_finetune_tokens"] = (
+            DEFAULT_FULL_FT_EPOCHS * ALL_FT_TOKENS
+        )
+        processed_df.loc[mask, "num_finetuned_tokens_real"] = (
+            DEFAULT_FULL_FT_EPOCHS * ALL_FT_TOKENS
+        )
 
         if (
             "num_finetune_tokens_per_epoch" in processed_df.columns
